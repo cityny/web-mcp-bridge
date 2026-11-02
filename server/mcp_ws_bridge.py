@@ -246,6 +246,7 @@ class BridgeManager:
         self.config_path = config_path
         self.owner_origin = owner_origin
         self.write_lock = asyncio.Lock()
+        self.config_error: str | None = None  # último error al leer servers.json (se muestra en la extensión)
 
     def listing(self) -> list[dict]:
         return [
@@ -313,7 +314,8 @@ async def handle_control(ws, manager: BridgeManager) -> None:
         log.warning("[control] Conexión rechazada: Origin no permitido (%s)", origin)
         await ws.close(1008, "Origin no permitido")
         return
-    await _reply(ws, type="servers", servers=manager.listing(), editable=bool(manager.config_path))
+    await _reply(ws, type="servers", servers=manager.listing(), editable=bool(manager.config_path),
+                 config_error=manager.config_error)
     try:
         raw = await asyncio.wait_for(ws.recv(), CONTROL_REQUEST_TIMEOUT)
     except Exception:  # noqa: BLE001  (el cliente cerró o no pidió nada)
@@ -350,7 +352,8 @@ async def handle_control(ws, manager: BridgeManager) -> None:
             log.warning("[control] servers.json NO guardado: %s", err)
             await _reply(ws, type="result", ok=False, error=str(err))
             return
-    log.info("✎ servers.json guardado desde la extensión (%d servidor(es))", len(configs))
+    manager.config_error = None
+    log.info("✎ servers.json guardado desde la extensión (%d servidor(es)): %s", len(configs), ", ".join(c.name for c in configs))
     await _reply(ws, type="result", ok=True, servers=manager.listing())
 
 
@@ -372,7 +375,9 @@ async def _watch_config(path: Path, manager: BridgeManager) -> None:
             configs = load_config(path)
         except Exception as err:  # noqa: BLE001
             log.error("servers.json inválido, se mantiene la configuración anterior: %s", err)
+            manager.config_error = str(err)
             continue
+        manager.config_error = None
         log.info("↻ servers.json cambió: aplicando %d servidor(es)", len(configs))
         await manager.apply(configs)
 
@@ -382,6 +387,11 @@ async def run(configs: list[ServerConfig], config_path: Path | None = None, cont
     manager = BridgeManager(config_path, owner_origin or f"chrome-extension://{EXTENSION_ID}")
     control = None
     tasks = []
+    if config_path and not configs:
+        try:
+            load_config(config_path)  # solo para conocer el error y mostrarlo en la extensión
+        except Exception as err:  # noqa: BLE001
+            manager.config_error = str(err)
     try:
         await manager.apply(configs)
         if not manager.active and not config_path:  # con --config se sigue: el editor de la extensión puede arreglarlo
@@ -488,6 +498,7 @@ def parse_args(argv: list[str] | None = None) -> tuple[list[ServerConfig], Path 
         filename=str(args.log_file) if args.log_file else None,
         encoding="utf-8" if args.log_file else None,
     )
+    logging.getLogger("websockets").setLevel(logging.WARNING)  # sin «connection open» en cada consulta del popup
 
     if args.config:
         control = CONTROL_PORT if args.control_port is None else args.control_port

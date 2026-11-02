@@ -158,7 +158,10 @@ $('#add-form').addEventListener('submit', async (event) => {
 /** Pide al puente la lista de MCP del PC y registra los nuevos (desactivados). `quiet`: sin avisos si no hay nada nuevo. */
 async function discover(quiet = false) {
   try {
-    const { found, added } = await api('DISCOVER_SERVERS');
+    const { found, added, configError } = await api('DISCOVER_SERVERS');
+    const banner = $('#config-error');
+    banner.hidden = !configError;
+    banner.textContent = configError ? `⚠️ La configuración de MCP del PC tiene un error y no se aplicó: ${configError}. Ábrela con «Añadir o editar MCP…».` : '';
     if (added.length) toast(`Nuevos MCP detectados: ${added.join(', ')}. Actívalos con su interruptor.`);
     else if (!quiet) toast(found ? `Ningún MCP nuevo (${found} ya registrados).` : 'El puente no tiene MCP configurados.');
   } catch (err) {

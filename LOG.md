@@ -82,3 +82,11 @@
   - el popup tiene el botón «Añadir o editar MCP…»;
   - en el registro no se guarda el contenido del archivo, solo su tamaño.
 - Pruebas: `test_bridge_config` (propietario frente a otra extensión o sin Origin, inválido sin cambios, válido + `.bak` + aplicado) y prueba con la extensión real en Chromium (plantilla HTTP → guardar → archivo y puente actualizados; ayuda de barras).
+
+## 2026-11-02 — Claude (asistente de desarrollo) · `autocad` no llegaba al puente
+- Diagnóstico con el registro exportado y `bridge.log` de Isabel: se guardó desde el editor con los MISMOS 2 MCP (demo y autocad-files) y ningún MCP nuevo arrancó. Isabel rellenó la plantilla pero no pulsó «Añadir a la configuración» antes de «Guardar». Es un fallo de diseño (dos pasos), no suyo.
+- Cambios:
+  - el editor, al guardar con una plantilla rellenada y sin añadir, pregunta si añadirla; tras añadir o guardar vacía la plantilla; el aviso de guardado nombra los MCP;
+  - el puente informa del último error de `servers.json` (`config_error` en el canal de control) y el popup lo muestra como aviso;
+  - el log del puente nombra los MCP al guardar y deja de escribir «connection open» en cada consulta (logger `websockets` en WARNING).
+- Pruebas: Chromium (plantilla sin añadir → pregunta → guardado con `autocad`; JSON roto → aviso en el popup) y `test_bridge_config` (`config_error` se informa y se limpia).

@@ -242,7 +242,7 @@ function bridgeControl(request = null, { url = DISCOVERY_URL, timeout = DISCOVER
       if (!listing) {
         if (msg?.type !== 'servers' || !Array.isArray(msg.servers)) { done(reject, new Error('Respuesta inesperada del puente.')); return; }
         listing = msg;
-        if (!request) done(resolve, msg.servers);
+        if (!request) done(resolve, msg);
         else ws.send(JSON.stringify(request));
         return;
       }
@@ -343,7 +343,8 @@ const mutations = {
    * Se añaden DESACTIVADOS: el usuario elige cuáles activar con su interruptor.
    */
   DISCOVER_SERVERS: () => mutate(async (servers, settings) => {
-    const found = await fetchDiscovery();
+    const listing = await fetchDiscovery();
+    const found = listing.servers;
     const known = new Set(servers.map((s) => localPort(s.url)).filter(Boolean));
     const added = [];
     for (const item of found) {
@@ -355,7 +356,7 @@ const mutations = {
       added.push(name);
     }
     if (added.length) await saveServers(servers);
-    return { ok: true, found: found.length, added };
+    return { ok: true, found: found.length, added, configError: listing.config_error ?? null };
   }),
 
   UPDATE_SETTINGS: ({ settings: patch }) => mutate(async (_servers, settings) => {

@@ -152,7 +152,18 @@ async function load() {
   validate();
 }
 
+/** ¿Hay una plantilla rellenada que aún no se añadió a la configuración? */
+function pendingTemplate() {
+  if (!$('#tpl-name').value.trim()) return null;
+  try { return buildTemplate(); } catch { return null; }
+}
+
 async function save() {
+  const pending = pendingTemplate();
+  const currentNames = (() => { try { return normalize(parseContent($('#content').value).data).map((e) => e.name); } catch { return []; } })();
+  if (pending && !currentNames.includes(pending.name)) {
+    if (confirm(`Rellenaste «${pending.name}» en «Añadir un MCP» pero aún no está en la configuración. ¿Añadirlo antes de guardar?`)) addTemplate();
+  }
   const entries = validate();
   if (!entries) return;
   const changed = entries.filter((e) => originalByName.get(e.name) !== commandLine(e.command));
@@ -170,7 +181,8 @@ async function save() {
     originalByName = new Map(entries.map((e) => [e.name, commandLine(e.command)]));
     let added = [];
     try { added = (await api('DISCOVER_SERVERS')).added ?? []; } catch { /* el popup lo volverá a intentar */ }
-    toast(`Guardado: ${servers.length} MCP en el puente.${added.length ? ` Nuevos en la extensión: ${added.join(', ')} (actívalos en el popup).` : ''}`);
+    clearTemplate();
+    toast(`Guardado: ${servers.map((x) => x.name).join(', ') || 'ningún MCP'}.${added.length ? ` Nuevos en la extensión: ${added.join(', ')} (actívalos en el popup).` : ''}`);
   } catch (err) {
     setMsg($('#status'), `No se guardó: ${err.message}`, 'err');
     toast('No se guardó la configuración.');
@@ -209,6 +221,10 @@ function buildTemplate() {
   return { name, entry };
 }
 
+function clearTemplate() {
+  for (const id of ['#tpl-name', '#tpl-folder', '#tpl-url', '#tpl-command', '#tpl-args', '#tpl-port']) $(id).value = '';
+}
+
 function addTemplate() {
   const msg = $('#tpl-msg');
   try {
@@ -226,6 +242,7 @@ function addTemplate() {
     }
     $('#content').value = `${JSON.stringify(data, null, 2)}\n`;
     validate();
+    clearTemplate();
     setMsg(msg, `Añadido «${name}». Revisa la vista previa y pulsa Guardar.`, 'ok');
   } catch (err) {
     setMsg(msg, err.message, 'err');

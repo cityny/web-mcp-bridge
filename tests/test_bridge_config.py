@@ -122,10 +122,11 @@ async def test_live(cfg: Path) -> None:
         await ws.send(json.dumps({"jsonrpc": "2.0", "id": 1, "method": "ping"}))
         assert json.loads(await asyncio.wait_for(ws.recv(), 10))["result"] == {}
 
-    # JSON inválido: se mantiene la configuración anterior
+    # JSON inválido: se mantiene la configuración anterior y el error se informa a la extensión
     cfg.write_text("{ roto", encoding="utf-8")
     await asyncio.sleep(3)
-    assert len((await discover())["servers"]) == 2
+    msg = await discover()
+    assert len(msg["servers"]) == 2 and msg["config_error"], msg
 
     # Quitar un servidor lo detiene
     write(cfg, {"demo": {"command": PY, "args": [DEMO], "port": 18890}})
@@ -133,6 +134,7 @@ async def test_live(cfg: Path) -> None:
     async def one():
         return [s["name"] for s in (await discover())["servers"]] == ["demo"]
     assert await wait_for(one), "no se detuvo el servidor eliminado"
+    assert (await discover())["config_error"] is None, "un JSON válido limpia el error"
 
 
 if __name__ == "__main__":
