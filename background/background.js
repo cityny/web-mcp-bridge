@@ -138,7 +138,7 @@ async function reconcile() {
     if (existing) {
       existing.server = server;
     } else {
-      const conn = new McpConnection(server, (evt) => onConnectionChange(evt, conn));
+      const conn = new McpConnection(server, (evt) => onConnectionChange(evt, conn), () => gateFor(conn.server));
       connections.set(id, conn);
       conn.connect();
     }
@@ -280,17 +280,40 @@ function bridgeControl(request = null, { url = DISCOVERY_URL, timeout = DISCOVER
 }
 
 /** Último estado conocido del puente local (lo muestra la interfaz). */
-const bridgeStatus = { ok: null, at: 0, count: 0, error: null, configError: null };
+const bridgeStatus = { ok: null, at: 0, count: 0, error: null, configError: null, ports: [] };
 
 async function fetchDiscovery() {
+  const wasOk = bridgeStatus.ok;
   try {
     const listing = await bridgeControl();
-    Object.assign(bridgeStatus, { ok: true, at: Date.now(), count: listing.servers.length, error: null, configError: listing.config_error ?? null });
+    Object.assign(bridgeStatus, {
+      ok: true, at: Date.now(), count: listing.servers.length, error: null, configError: listing.config_error ?? null,
+      ports: listing.servers.map((s) => Number(s.port)),
+    });
+    // Los MCP que estaban en espera (puente caído o MCP que faltaba) se conectan ya, sin esperar al reintento.
+    for (const conn of connections.values()) if (conn.status !== 'connected' && !gateFor(conn.server)) conn.connect();
+    if (wasOk === false) log('info', 'bridge.up', { servers: listing.servers.length });
     return listing;
   } catch (err) {
+    if (wasOk !== false) log('warn', 'bridge.down', { error: err.message });
     Object.assign(bridgeStatus, { ok: false, at: Date.now(), error: err.message });
     throw err;
   }
+}
+
+/**
+ * ¿Se puede intentar conectar ya con este MCP? Solo se frenan los MCP que gestiona el puente (detectados):
+ * si el puente no responde o no tiene ese puerto configurado, intentar solo produciría ERR_CONNECTION_REFUSED.
+ * @returns {string|null} motivo de la espera, o null si se puede conectar
+ */
+function gateFor(server) {
+  if (!server?.managed) return null;
+  if (bridgeStatus.ok === false) return 'El puente local no responde. Se conectará solo cuando vuelva.';
+  const port = localPort(server.url);
+  if (bridgeStatus.ok === true && port && !bridgeStatus.ports.includes(port)) {
+    return `No está en la configuración del puente (puerto ${port}). Añádelo en «Añadir o editar MCP» o quítalo de la lista.`;
+  }
+  return null;
 }
 
 /** Puerto de una dirección ws:// local, o null si no es local. */
@@ -389,16 +412,21 @@ const mutations = {
     const listing = await fetchDiscovery();
     const found = listing.servers;
     const known = new Set(servers.map((s) => localPort(s.url)).filter(Boolean));
+    const ports = new Set(found.map((item) => Number(item?.port)));
+    let marked = false;
+    for (const s of servers) { // los ya registrados que el puente gestiona también quedan marcados
+      if (!s.managed && ports.has(localPort(s.url))) { s.managed = true; marked = true; }
+    }
     const added = [];
     for (const item of found) {
       const port = Number(item?.port);
       if (!Number.isInteger(port) || port <= 0 || known.has(port)) continue;
       const name = String(item.name ?? '').trim().slice(0, 40) || `mcp-${port}`;
-      servers.push({ id: crypto.randomUUID(), name, url: `ws://localhost:${port}`, enabled: false, permission: settings.defaultPermission });
+      servers.push({ id: crypto.randomUUID(), name, url: `ws://localhost:${port}`, enabled: false, permission: settings.defaultPermission, managed: true });
       known.add(port);
       added.push(name);
     }
-    if (added.length) await saveServers(servers);
+    if (added.length || marked) await saveServers(servers);
     return { ok: true, found: found.length, added, configError: listing.config_error ?? null };
   }),
 
@@ -560,8 +588,12 @@ async function checkUpdate() {
 chrome.alarms.create('wmb-keepalive', { periodInMinutes: 0.5 });
 chrome.alarms.create('wmb-update', { periodInMinutes: 1 });
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === 'wmb-keepalive') reconcile().catch((err) => log('error', 'reconcile', { error: err.message }));
+  if (alarm.name === 'wmb-keepalive') {
+    reconcile().catch((err) => log('error', 'reconcile', { error: err.message }));
+    fetchDiscovery().catch(() => {}); // estado del puente al día (decide qué MCP vale la pena intentar)
+  }
   if (alarm.name === 'wmb-update') checkUpdate().catch(() => {});
+fetchDiscovery().catch(() => {});
 });
 checkUpdate().catch(() => {});
 

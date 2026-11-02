@@ -28,10 +28,13 @@ export class McpConnection {
   /**
    * @param {{id:string,name:string,url:string}} server
    * @param {(evt:{kind:'status'|'tools',prev?:string,next?:string}) => void} onChange
+   * @param {() => string|null} gate motivo para NO intentar conectar ahora (p. ej. el puente no tiene ese MCP);
+   *   evita llenar chrome://extensions de errores «ERR_CONNECTION_REFUSED» con reintentos inútiles.
    */
-  constructor(server, onChange = () => {}) {
+  constructor(server, onChange = () => {}, gate = () => null) {
     this.server = server;
     this.onChange = onChange;
+    this.gate = gate;
     this.status = 'disconnected'; // connecting | connected | disconnected | error
     this.tools = [];
     this.serverInfo = null;
@@ -46,6 +49,14 @@ export class McpConnection {
     clearTimeout(this.#reconnectTimer);
     const state = this.#ws?.readyState;
     if (state === WebSocket.OPEN || state === WebSocket.CONNECTING) return;
+
+    const blocked = this.gate();
+    if (blocked) { // no se abre el WebSocket: se reintenta más tarde sin generar errores en Chrome
+      this.lastError = blocked;
+      this.#setStatus('error');
+      this.#scheduleReconnect();
+      return;
+    }
 
     this.#setStatus('connecting');
     let ws;
