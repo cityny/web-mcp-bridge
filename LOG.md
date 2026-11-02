@@ -145,3 +145,10 @@
   1. su `main` local es el del clon original (antiguo, todavía con `server/bridge.log`);
   2. tiene cambios locales sin confirmar en 17 archivos (origen desconocido: hay que verlos antes de decidir).
   Recomendación: `git checkout -B main origin/main`, que conserva esos cambios porque el árbol de la rama y el de `origin/main` son idénticos, y después revisar `git status` / `git diff --stat`. La actualización automática no actúa mientras haya cambios locales.
+
+## 2026-11-02 — Claude (asistente de desarrollo) · Carpeta de Isabel con el código ORIGINAL
+- `git diff --stat` de Isabel coincide línea por línea con la diferencia entre el commit original del fork (`d768e0a`) y el último (`848b9f2`). Es decir, Git apunta a la versión nueva, pero los archivos de su carpeta son los del proyecto original. No hay trabajo propio de Isabel en esos cambios.
+- Consecuencia: Chrome cargaba el código ORIGINAL (manifest sin `key` → otro ID; sin editor, sin registro…). Eso explica que la recarga diera problemas y hubiera que quitar y volver a poner la extensión.
+- Causa: desconocida (algo restauró los archivos antiguos después de ejecutar el instalador nuevo: `update-hidden.vbs` y `update-stamp.json` existen).
+- Solución propuesta: `git restore .` (es seguro: el contenido antiguo sigue en el historial, `d768e0a`) y después `git checkout -B main origin/main`.
+- `.gitignore`: se añade `server/servers.json.bak`.
