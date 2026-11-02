@@ -15,7 +15,22 @@ Uso rápido
     python mcp_ws_bridge.py --port 8081 -- npx -y @modelcontextprotocol/server-filesystem ~/proyectos
 
     # Varios servidores a la vez desde un archivo de configuración
+    # (se recarga solo al guardarlo: no hace falta reiniciar el puente)
     python mcp_ws_bridge.py --config servers.json
+
+Formatos de servers.json admitidos
+----------------------------------
+    {"servers": [{"name": "demo", "port": 8090, "command": ["python", "demo.py"]}]}
+    {"mcpServers": {"archivos": {"command": "npx", "args": ["-y", "…"], "port": 8091}}}   # estilo Claude Desktop
+    {"archivos": {"command": "npx", "args": ["-y", "…"], "port": 8091}}
+Si una entrada no indica `port`, se le asigna uno libre a partir de 8800.
+
+Descubrimiento
+--------------
+Con --config, el puente abre además un canal de control en ws://127.0.0.1:8765 (--control-port).
+Al conectarse, envía la lista de servidores configurados ({"type": "servers", "servers": […]})
+y cierra. La extensión lo usa para mostrar los MCP del PC sin escribir direcciones a mano.
+Mismas reglas de seguridad: solo 127.0.0.1 y solo orígenes de extensión.
 
 Seguridad
 ---------
@@ -47,6 +62,9 @@ except ImportError:  # websockets 12
 log = logging.getLogger("mcp_ws_bridge")
 
 STDIO_LIMIT = 32 * 1024 * 1024  # tamaño máximo de un mensaje JSON-RPC
+CONTROL_PORT = 8765              # canal de descubrimiento (lista de servidores configurados)
+AUTO_PORT_START = 8800           # primer puerto para entradas sin `port`
+RELOAD_INTERVAL = 2.0            # segundos entre comprobaciones de cambios en servers.json
 ALLOWED_ORIGIN_PREFIXES = ("chrome-extension://", "moz-extension://")
 
 
@@ -202,46 +220,173 @@ async def handle_client(ws, cfg: ServerConfig) -> None:
         log.info("[%s] Cliente desconectado", cfg.name)
 
 
-async def run(configs: list[ServerConfig]) -> None:
-    servers = []
+async def _serve(cfg: ServerConfig):
+    server = await ws_serve(lambda ws, cfg=cfg: handle_client(ws, cfg), cfg.host, cfg.port, max_size=STDIO_LIMIT)
+    log.info("✔ «%s» disponible en ws://%s:%d  →  %s", cfg.name, cfg.host, cfg.port, " ".join(cfg.command))
+    return server
+
+
+async def _close(server) -> None:
+    server.close()
     try:
-        for cfg in configs:
-            server = await ws_serve(
-                lambda ws, cfg=cfg: handle_client(ws, cfg),
-                cfg.host,
-                cfg.port,
-                max_size=STDIO_LIMIT,
-            )
-            servers.append(server)
-            log.info("✔ «%s» disponible en ws://%s:%d  →  %s", cfg.name, cfg.host, cfg.port, " ".join(cfg.command))
+        await asyncio.wait_for(server.wait_closed(), 5)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+class BridgeManager:
+    """Mantiene un listener WebSocket por servidor MCP y lo alinea con la configuración (recarga en caliente)."""
+
+    def __init__(self) -> None:
+        self.active: dict[str, tuple[ServerConfig, object]] = {}
+
+    def listing(self) -> list[dict]:
+        return [
+            {"name": cfg.name, "port": cfg.port, "url": f"ws://localhost:{cfg.port}"}
+            for cfg, _ in self.active.values()
+        ]
+
+    async def apply(self, configs: list[ServerConfig]) -> None:
+        wanted = {cfg.name: cfg for cfg in configs}
+        for name in list(self.active):
+            cfg, server = self.active[name]
+            if wanted.get(name) != cfg:  # eliminado o modificado → se cierra (y se reabre abajo si sigue)
+                await _close(server)
+                del self.active[name]
+                log.info("■ «%s» detenido (puerto %d)", name, cfg.port)
+        for name, cfg in wanted.items():
+            if name in self.active:
+                continue
+            try:
+                self.active[name] = (cfg, await _serve(cfg))
+            except OSError as err:
+                log.error("No se pudo abrir el puerto %d para «%s»: %s", cfg.port, name, err)
+
+    async def close(self) -> None:
+        for _, server in self.active.values():
+            server.close()
+        await asyncio.gather(*(s.wait_closed() for _, s in self.active.values()), return_exceptions=True)
+        self.active.clear()
+
+
+async def handle_control(ws, manager: BridgeManager) -> None:
+    """Canal de descubrimiento: envía la lista de servidores configurados y cierra."""
+    _, headers = _request_parts(ws)
+    origin = headers.get("Origin")
+    if not (origin is None or origin.startswith(ALLOWED_ORIGIN_PREFIXES)):
+        log.warning("[control] Conexión rechazada: Origin no permitido (%s)", origin)
+        await ws.close(1008, "Origin no permitido")
+        return
+    await ws.send(json.dumps({"type": "servers", "servers": manager.listing()}, ensure_ascii=False))
+    await ws.close()
+
+
+async def _watch_config(path: Path, manager: BridgeManager) -> None:
+    """Recarga servers.json cuando cambia. Si el archivo nuevo es inválido, se mantiene la configuración actual."""
+    def stamp():
+        try:
+            return path.stat().st_mtime_ns
+        except OSError:
+            return None
+    last = stamp()
+    while True:
+        await asyncio.sleep(RELOAD_INTERVAL)
+        current = stamp()
+        if current == last:
+            continue
+        last = current
+        try:
+            configs = load_config(path)
+        except Exception as err:  # noqa: BLE001
+            log.error("servers.json inválido, se mantiene la configuración anterior: %s", err)
+            continue
+        log.info("↻ servers.json cambió: aplicando %d servidor(es)", len(configs))
+        await manager.apply(configs)
+
+
+async def run(configs: list[ServerConfig], config_path: Path | None = None, control_port: int = 0) -> None:
+    manager = BridgeManager()
+    control = None
+    tasks = []
+    try:
+        await manager.apply(configs)
+        if not manager.active:
+            raise OSError("ningún servidor pudo arrancar")
+        if control_port:
+            try:
+                control = await ws_serve(lambda ws: handle_control(ws, manager), "127.0.0.1", control_port)
+                log.info("✔ Descubrimiento disponible en ws://127.0.0.1:%d", control_port)
+            except OSError as err:
+                log.error("No se pudo abrir el canal de descubrimiento (%d): %s", control_port, err)
+        if config_path:
+            tasks.append(asyncio.create_task(_watch_config(config_path, manager)))
         await asyncio.Event().wait()  # bloquea hasta Ctrl+C
     finally:
-        for server in servers:
-            server.close()
-        await asyncio.gather(*(s.wait_closed() for s in servers), return_exceptions=True)
+        for task in tasks:
+            task.cancel()
+        if control:
+            await _close(control)
+        await manager.close()
 
 
 # ───────────────────────── CLI ─────────────────────────
 
+def _entries(data) -> list[dict]:
+    """Normaliza los formatos admitidos a una lista de entradas con `name`."""
+    if isinstance(data, dict) and isinstance(data.get("servers"), list):
+        return [dict(e) for e in data["servers"]]
+    mapping = data.get("mcpServers", data) if isinstance(data, dict) else None
+    if not isinstance(mapping, dict):
+        raise ValueError("formato no reconocido: se esperaba {\"servers\": [...]}, {\"mcpServers\": {...}} o {nombre: {...}}")
+    entries = []
+    for name, entry in mapping.items():
+        if not isinstance(entry, dict):
+            raise ValueError(f"«{name}» debe ser un objeto con al menos `command`")
+        entries.append({"name": name, **entry})
+    return entries
+
+
 def load_config(path: Path) -> list[ServerConfig]:
-    data = json.loads(path.read_text(encoding="utf-8"))
-    configs = []
-    for entry in data["servers"]:
+    data = json.loads(path.read_text(encoding="utf-8-sig"))
+    entries = _entries(data)
+    used = {int(e["port"]) for e in entries if e.get("port") is not None}
+    next_port = AUTO_PORT_START
+    configs, names = [], set()
+    for entry in entries:
+        name = str(entry.get("name") or "").strip()
+        if not name:
+            raise ValueError("cada servidor necesita un nombre")
+        if name in names:
+            raise ValueError(f"nombre repetido: «{name}»")
+        names.add(name)
+        command = entry.get("command")
+        command = [command] if isinstance(command, str) else list(command or [])
+        command += [str(a) for a in entry.get("args", [])]
+        if not command:
+            raise ValueError(f"«{name}» no tiene `command`")
+        if entry.get("port") is None:
+            while next_port in used:
+                next_port += 1
+            entry["port"] = next_port
+            used.add(next_port)
         configs.append(
             ServerConfig(
-                name=entry["name"],
-                command=list(entry["command"]),
+                name=name,
+                command=command,
                 port=int(entry["port"]),
                 host=entry.get("host", "127.0.0.1"),
                 cwd=entry.get("cwd"),
-                env=entry.get("env", {}),
+                env={str(k): str(v) for k, v in (entry.get("env") or {}).items()},
                 token=entry.get("token"),
             )
         )
+    ports = [c.port for c in configs]
+    if len(ports) != len(set(ports)):
+        raise ValueError(f"hay puertos repetidos: {sorted(p for p in set(ports) if ports.count(p) > 1)}")
     return configs
 
 
-def parse_args(argv: list[str] | None = None) -> list[ServerConfig]:
+def parse_args(argv: list[str] | None = None) -> tuple[list[ServerConfig], Path | None, int]:
     parser = argparse.ArgumentParser(
         description="Puente WebSocket ⇄ MCP (stdio) para Web MCP Bridge.",
         usage="%(prog)s [--port N] [--name NOMBRE] -- COMANDO [ARGS…]\n       %(prog)s --config servers.json",
@@ -252,6 +397,8 @@ def parse_args(argv: list[str] | None = None) -> list[ServerConfig]:
     parser.add_argument("--name", default="mcp", help="Nombre para los logs")
     parser.add_argument("--token", help="Exige ?token=… en la URL del WebSocket")
     parser.add_argument("--cwd", help="Directorio de trabajo del servidor MCP")
+    parser.add_argument("--control-port", type=int, default=None,
+                        help=f"Canal de descubrimiento (por defecto {CONTROL_PORT} con --config; 0 = desactivado)")
     parser.add_argument("--log-file", type=Path, help="Escribe los logs en este archivo (útil como servicio)")
     parser.add_argument("-v", "--verbose", action="store_true")
     parser.add_argument("command", nargs=argparse.REMAINDER, help="Comando que lanza el servidor MCP (stdio)")
@@ -266,18 +413,24 @@ def parse_args(argv: list[str] | None = None) -> list[ServerConfig]:
     )
 
     if args.config:
-        return load_config(args.config)
+        control = CONTROL_PORT if args.control_port is None else args.control_port
+        return load_config(args.config), args.config, control
 
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     if not command:
         parser.error("indica el comando del servidor MCP tras `--` o usa --config")
-    return [ServerConfig(name=args.name, command=command, port=args.port, host=args.host, cwd=args.cwd, token=args.token)]
+    single = [ServerConfig(name=args.name, command=command, port=args.port, host=args.host, cwd=args.cwd, token=args.token)]
+    return single, None, args.control_port or 0
 
 
 def main(argv: list[str] | None = None) -> int:
-    configs = parse_args(argv)
     try:
-        asyncio.run(run(configs))
+        configs, config_path, control_port = parse_args(argv)
+    except (OSError, ValueError) as err:  # servers.json ausente, JSON inválido o formato no reconocido
+        log.error("No se pudo leer la configuración: %s", err)
+        return 1
+    try:
+        asyncio.run(run(configs, config_path, control_port))
     except KeyboardInterrupt:
         log.info("Detenido.")
     except OSError as err:

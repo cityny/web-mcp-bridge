@@ -155,6 +155,19 @@ $('#add-form').addEventListener('submit', async (event) => {
   await refresh(true);
 });
 
+/** Pide al puente la lista de MCP del PC y registra los nuevos (desactivados). `quiet`: sin avisos si no hay nada nuevo. */
+async function discover(quiet = false) {
+  try {
+    const { found, added } = await api('DISCOVER_SERVERS');
+    if (added.length) toast(`Nuevos MCP detectados: ${added.join(', ')}. Actívalos con su interruptor.`);
+    else if (!quiet) toast(found ? `Ningún MCP nuevo (${found} ya registrados).` : 'El puente no tiene MCP configurados.');
+  } catch (err) {
+    if (!quiet) toast(err.message);
+  }
+  await refresh(true);
+}
+$('#discover').addEventListener('click', () => discover(false));
+
 // ───────────────────────── Historial ─────────────────────────
 
 async function renderHistory() {
@@ -254,5 +267,5 @@ async function refresh(force = false) {
   } catch (err) { toast(err.message); }
 }
 
-refresh(true);
+refresh(true).then(() => discover(true)); // al abrir el popup: detección silenciosa
 setInterval(refresh, 1500);

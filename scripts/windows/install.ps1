@@ -10,7 +10,7 @@
     3. Ejecuta server\install_service.py: instala dependencias, registra el arranque automatico
        al iniciar sesion y arranca el puente en segundo plano.
     (Antes de 3 detiene un puente anterior, asi se puede volver a ejecutar sin conflictos de puerto.)
-    4. Comprueba que el puente escucha en 127.0.0.1:8090.
+    4. Comprueba que el puente responde (canal de descubrimiento 127.0.0.1:8765).
     5. Copia al portapapeles la ruta de la extension y abre chrome://extensions.
 
   Desinstalar el arranque automatico:
@@ -60,7 +60,7 @@ if (Test-Path $Config) {
   $demo = Join-Path $Repo 'server\examples\demo_mcp_server.py'
   $json = [ordered]@{ servers = @([ordered]@{ name = 'demo'; port = 8090; command = @($Python, $demo) }) } | ConvertTo-Json -Depth 5
   [System.IO.File]::WriteAllText($Config, $json, (New-Object System.Text.UTF8Encoding($false)))
-  Ok "Creado $Config (solo 'demo'). Editalo para anadir tus MCP y vuelve a ejecutar este script."
+  Ok "Creado $Config (solo 'demo'). Editalo para anadir tus MCP: el puente lo recarga solo al guardar."
 }
 
 # Un puente anterior ocupando los puertos impediria arrancar el nuevo ("solo se permite un uso de cada direccion")
@@ -75,17 +75,17 @@ Step 'Instalando el puente (arranque automatico al iniciar sesion)'
 if ($LASTEXITCODE -ne 0) { Fail 'install_service.py fallo (mira el mensaje anterior).' }
 
 # 4) Verificar que el puente escucha
-Step 'Comprobando que el puente responde en 127.0.0.1:8090'
+Step 'Comprobando que el puente responde (descubrimiento en 127.0.0.1:8765)'
 $listening = $false
 for ($i = 0; $i -lt 10 -and -not $listening; $i++) {
   Start-Sleep -Seconds 1
   try {
     $client = New-Object System.Net.Sockets.TcpClient
-    $client.Connect('127.0.0.1', 8090); $listening = $client.Connected; $client.Close()
+    $client.Connect('127.0.0.1', 8765); $listening = $client.Connected; $client.Close()
   } catch { }
 }
 if ($listening) { Ok 'Puente activo.' }
-else { Write-Host "  AVISO  El puerto 8090 no responde todavia. Revisa server\bridge.log" -ForegroundColor Yellow }
+else { Write-Host "  AVISO  El puerto 8765 no responde todavia. Revisa server\bridge.log" -ForegroundColor Yellow }
 
 # 5) Extension en Chrome
 Step 'Cargar la extension en Chrome'
@@ -93,7 +93,7 @@ Set-Clipboard -Value $Repo
 Write-Host "  Ruta de la extension (copiada al portapapeles): $Repo"
 Write-Host '  1. En chrome://extensions activa "Modo de desarrollador" (arriba a la derecha).'
 Write-Host '  2. Pulsa "Cargar descomprimida" y pega la ruta.'
-Write-Host '  3. Abre el popup de la extension > "Anadir servidor de prueba (demo)": debe ponerse en verde.'
+Write-Host '  3. Abre el popup: detecta solos los MCP de server\servers.json. Activa los que quieras con su interruptor.'
 try { Start-Process 'chrome' 'chrome://extensions' } catch { Write-Host '  (Abre Chrome y ve a chrome://extensions manualmente.)' }
 
 Write-Host "`nListo." -ForegroundColor Green

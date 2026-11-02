@@ -132,3 +132,6 @@ select[data-perm="allow"] { border-color: var(--ok); }
 select[data-perm="deny"] { border-color: var(--err); }
 .server .perm { margin-top: 6px; }
 #add-demo { font: inherit; font-size: 12px; padding: 5px 9px; cursor: pointer; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); }
+
+.discover { display: flex; flex-direction: column; gap: 4px; margin: 12px 0; }
+.discover button { width: 100%; }

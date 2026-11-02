@@ -10,6 +10,7 @@ import { McpConnection } from './ws_client.js';
 import {
   STORAGE_KEYS as KEYS, DEFAULT_SETTINGS, MAX_ACTIVE_SERVERS,
   CALL_TIMEOUT_MS, HISTORY_LIMIT, SUPPORTED_URL_PATTERNS, PERMISSIONS,
+  DISCOVERY_URL, DISCOVERY_TIMEOUT_MS,
 } from '../shared/constants.js';
 
 /** @type {Map<string, McpConnection>} serverId → conexión */
@@ -194,6 +195,34 @@ async function callTool({ server, name, arguments: args }) {
   }
 }
 
+// ───────────────────────── Descubrimiento de MCP del PC ─────────────────────────
+
+/** Pide al puente local la lista de MCP configurados en servers.json. */
+function fetchDiscovery(url = DISCOVERY_URL, timeout = DISCOVERY_TIMEOUT_MS) {
+  return new Promise((resolve, reject) => {
+    let ws;
+    const timer = setTimeout(() => { try { ws?.close(); } catch { /* noop */ } reject(new Error('El puente no respondió. ¿Está en marcha?')); }, timeout);
+    const done = (fn, value) => { clearTimeout(timer); try { ws.close(); } catch { /* noop */ } fn(value); };
+    try { ws = new WebSocket(url); } catch (err) { clearTimeout(timer); reject(err); return; }
+    ws.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+        if (msg?.type !== 'servers' || !Array.isArray(msg.servers)) throw new Error('Respuesta inesperada del puente.');
+        done(resolve, msg.servers);
+      } catch (err) { done(reject, err); }
+    };
+    ws.onerror = () => done(reject, new Error('No se pudo contactar con el puente local (ws://127.0.0.1:8765).'));
+  });
+}
+
+/** Puerto de una dirección ws:// local, o null si no es local. */
+function localPort(raw) {
+  try {
+    const url = new URL(raw);
+    return ['localhost', '127.0.0.1'].includes(url.hostname) ? Number(url.port || 80) : null;
+  } catch { return null; }
+}
+
 // ───────────────────────── Mutaciones (desde el popup) ─────────────────────────
 
 function validateUrl(raw) {
@@ -259,6 +288,26 @@ const mutations = {
     }
     server.enabled = Boolean(enabled);
     await saveServers(servers);
+  }),
+
+  /**
+   * Registra los MCP que el puente tiene configurados y aún no están en la lista.
+   * Se añaden DESACTIVADOS: el usuario elige cuáles activar con su interruptor.
+   */
+  DISCOVER_SERVERS: () => mutate(async (servers, settings) => {
+    const found = await fetchDiscovery();
+    const known = new Set(servers.map((s) => localPort(s.url)).filter(Boolean));
+    const added = [];
+    for (const item of found) {
+      const port = Number(item?.port);
+      if (!Number.isInteger(port) || port <= 0 || known.has(port)) continue;
+      const name = String(item.name ?? '').trim().slice(0, 40) || `mcp-${port}`;
+      servers.push({ id: crypto.randomUUID(), name, url: `ws://localhost:${port}`, enabled: false, permission: settings.defaultPermission });
+      known.add(port);
+      added.push(name);
+    }
+    if (added.length) await saveServers(servers);
+    return { ok: true, found: found.length, added };
   }),
 
   UPDATE_SETTINGS: ({ settings: patch }) => mutate(async (_servers, settings) => {

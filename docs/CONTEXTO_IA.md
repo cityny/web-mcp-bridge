@@ -22,7 +22,7 @@ La IA escribe   ───────────►   Extensión ──WebSocke
 ```
 
 Las tres piezas:
-1. **Servidor MCP**: el programa que hace algo real (leer archivos, controlar una app…). Hoy uso solo `demo` (herramientas `hora_actual`, `sumar` y `eco`).
+1. **Servidor MCP**: el programa que hace algo real (leer archivos, controlar una app…). Uso `demo` (herramientas `hora_actual`, `sumar` y `eco`) y `autocad-files` (servidor de archivos oficial limitado a `C:/Users/Dionny Logistic/autocad-mcp`).
 2. **Puente** (`server/mcp_ws_bridge.py`): traduce WebSocket ↔ stdio. Arranca solo con Windows y lee `server/servers.json` (cada MCP con su nombre, puerto y comando). Solo arranca el proceso MCP cuando la extensión se conecta.
 3. **Extensión**:
    - inyecta en el chat las instrucciones con las herramientas disponibles;
@@ -30,7 +30,7 @@ Las tres piezas:
    - aplica el permiso de ese MCP (permitir siempre / preguntar / no permitir);
    - ejecuta la llamada vía puente y devuelve el resultado al chat.
 
-En el popup registro cada MCP por su URL (`ws://localhost:<puerto>`). Puedo registrar los que quiera, pero solo 5 pueden estar activos a la vez, porque cada MCP activo consume tokens de contexto. Cada uno se activa o desactiva con un interruptor.
+El popup detecta los MCP configurados en `server/servers.json` (canal de descubrimiento del puente en `ws://127.0.0.1:8765`) y los añade desactivados; también se pueden registrar a mano por URL (`ws://localhost:<puerto>`). El puente recarga `servers.json` solo al guardarlo. Puedo registrar los que quiera, pero solo 5 pueden estar activos a la vez, porque cada MCP activo consume tokens de contexto. Cada uno se activa o desactiva con un interruptor.
 
 ## Estructura del código
 | Ruta | Rol |
@@ -55,6 +55,7 @@ En el popup registro cada MCP por su URL (`ws://localhost:<puerto>`). Puedo regi
    - caché de la lista de mensajes;
    - prueba en Chromium con un DOM simulado.
 4. Instalación en Windows: `INSTALL.md` + `install.ps1`. Ya instalado y funcionando con `demo` en mi PC.
+5. Descubrimiento de MCP desde el popup, recarga en caliente de `servers.json` y formatos `{nombre: {command, args, port}}` / `mcpServers`.
 
 ## Objetivos
 - Que funcione de forma fiable con **DeepSeek** (mi plataforma principal).
@@ -70,9 +71,7 @@ En el popup registro cada MCP por su URL (`ws://localhost:<puerto>`). Puedo regi
   - una tarea programada de Windows hace `git pull` cada pocos minutos;
   - la extensión detecta que la versión en disco cambió y se recarga sola.
   La extensión nunca ejecuta comandos en el PC.
-- **D. Gestionar los MCP desde el popup** (hoy hay que editar `servers.json` y volver a ejecutar el instalador):
-  - el puente recarga `servers.json` en caliente;
-  - el popup añade, edita y quita MCP a través del puente, con clave local, confirmación y registro.
+- **D. Gestionar los MCP desde el popup** (la detección y la recarga en caliente ya están hechas): falta añadir, editar y quitar MCP desde el popup a través del puente, con clave local, confirmación y registro.
 
 ## Pendientes y riesgos conocidos
 - Llevar los cambios de la rama de desarrollo a `main` (pull request pendiente de mi aprobación).

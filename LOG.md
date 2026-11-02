@@ -29,3 +29,15 @@
 ## 2026-11-02 — Isabel (usuaria) / Claude · Prueba de instalación
 - `scripts/windows/install.ps1` ejecutado en Windows (usuario con espacio en la ruta): todos los pasos OK, puente escuchando en 127.0.0.1:8090.
 - Incidencia de uso: al clonar se queda en `main`, que no tiene el script. Se resolverá llevando los cambios a `main`.
+
+## 2026-11-02 — Claude (asistente de desarrollo) · Descubrimiento de MCP y recarga en caliente
+- Petición de Isabel: que la extensión lea los MCP del PC y ella elija cuáles activar; su `servers.json` usa el formato `{nombre: {port, command, args}}`, que el puente NO aceptaba (fallaba al arrancar).
+- Puente (`mcp_ws_bridge.py`):
+  - acepta `{"servers": [...]}`, `{"mcpServers": {...}}` y `{nombre: {...}}`, con `command` como texto o lista más `args`;
+  - asigna un puerto automático (desde 8800) si falta y valida nombres y puertos repetidos;
+  - recarga `servers.json` en caliente cada 2 s (`BridgeManager.apply`: arranca los nuevos, detiene los quitados y reinicia los cambiados). Con un JSON inválido mantiene la configuración anterior;
+  - abre un canal de descubrimiento de solo lectura en `ws://127.0.0.1:8765` (solo con `--config`): envía `{type:"servers", servers:[{name,port,url}]}`. Sigue la misma regla de Origin que los MCP (solo extensiones).
+- Extensión: mensaje `DISCOVER_SERVERS`; el popup detecta al abrirse (en silencio) y con el botón «Detectar MCP del PC». Los MCP nuevos se registran DESACTIVADOS (decide Isabel); no se duplican por puerto.
+- Decisión: el descubrimiento NO expone los comandos, solo nombre y puerto. Escribir `servers.json` desde el popup queda para más adelante, con clave y confirmación.
+- `install.ps1` comprueba ahora el puerto 8765 en vez del 8090 (el demo puede no estar en su configuración).
+- Pruebas: `tests/test_bridge_config.py` (formatos, descubrimiento, rechazo de una web, recarga, JSON inválido, quitar un servidor) y una prueba manual automatizada con la extensión real en Chromium: detección → activar → «Conectado».

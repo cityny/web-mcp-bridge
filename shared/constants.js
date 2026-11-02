@@ -41,6 +41,10 @@ export const DEFAULT_SETTINGS = {
 /** El servidor de prueba incluido en el repositorio (server/examples/demo_mcp_server.py). */
 export const DEMO_SERVER = { name: 'demo', url: 'ws://localhost:8090' };
 
+/** Canal de descubrimiento del puente local: devuelve los MCP configurados en server/servers.json. */
+export const DISCOVERY_URL = 'ws://127.0.0.1:8765';
+export const DISCOVERY_TIMEOUT_MS = 3000;
+
 export const PROTOCOL_VERSION = '2025-03-26';
 export const CALL_TIMEOUT_MS = 120_000;
 export const HISTORY_LIMIT = 50;
