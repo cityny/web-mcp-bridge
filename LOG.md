@@ -99,3 +99,8 @@
   - si el comando no existe o el MCP termina al arrancar, cierra el WebSocket con el motivo (código de salida + última línea de stderr);
   - `ws_client.js` guarda ese motivo como `lastError`, y el popup muestra el error bajo el MCP (antes solo como tooltip).
 - Prueba nueva `tests/test_bridge_errors.py` (comando inexistente y MCP que termina con código 3).
+
+## 2026-11-02 — Claude (asistente de desarrollo) · Causa: `mcp-proxy` instalado con `--user`
+- `pip show` de Isabel: `mcp-proxy` está en `C:\Users\…\AppData\Roaming\Python\Python314\site-packages`. `pip` lo instaló en modo usuario, porque `C:\Python314` no admite escritura sin permisos de administrador. Su `.exe` queda en `%APPDATA%\Python\Python314\Scripts`, que no está en el PATH ni en `C:\Python314\Scripts`. Por eso el puente daba `[WinError 2]` y la extensión mostraba «No se encontró o no se pudo ejecutar «mcp-proxy»» (la mejora anterior ya dio el motivo exacto).
+- Solución: `_resolve_executable` busca también en la carpeta de scripts de usuario (`sysconfig`, esquema `nt_user`).
+- Además: `ws_client.js` ya no registra un segundo «Conexión cerrada.» tras el motivo real (el handshake fallido no pisa el error de `onclose`).

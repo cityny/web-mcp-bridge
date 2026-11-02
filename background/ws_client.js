@@ -61,6 +61,7 @@ export class McpConnection {
 
     ws.onopen = () => {
       this.#handshake().catch((err) => {
+        if (this.#ws !== ws) return; // la conexión ya se cerró (onclose ya guardó el motivo real): no se pisa
         this.lastError = err.message;
         this.#setStatus('error');
         ws.close();

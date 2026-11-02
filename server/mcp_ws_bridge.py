@@ -50,6 +50,7 @@ import logging
 import os
 import shutil
 import sys
+import sysconfig
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -114,7 +115,15 @@ def _resolve_executable(command: str) -> str:
     if found:
         return found
     base = Path(sys.executable).parent
-    for folder in (base / "Scripts", base, base.parent / "Scripts"):
+    folders = [base / "Scripts", base, base.parent / "Scripts"]
+    # Instalaciones con `pip install --user` (lo que hace pip cuando la carpeta de Python no admite escritura):
+    # en Windows van a %APPDATA%\\Python\\Python3XX\\Scripts, que normalmente NO está en el PATH.
+    scheme = "nt_user" if os.name == "nt" else ("osx_framework_user" if sys.platform == "darwin" else "posix_user")
+    try:
+        folders.append(Path(sysconfig.get_path("scripts", scheme)))
+    except (KeyError, ValueError):
+        pass
+    for folder in folders:
         found = shutil.which(command, path=str(folder))
         if found:
             return found
