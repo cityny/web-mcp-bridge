@@ -249,6 +249,24 @@
     await guarded(deliver(srv, call, result), DELIVER_TIMEOUT_MS, 'El chat no aceptó el resultado a tiempo.');
   }
 
+  let lastUnreadable = '';
+
+  /** Avisa (panel, registro y a la propia IA) de un bloque mcp_call ilegible, para que la IA lo corrija. */
+  async function reportUnreadableCall(problem, text) {
+    const at = text.search(/\{\s*["“”]mcp_call/);
+    const snippet = text.slice(at, at + 300);
+    const sig = WMB.hash(snippet);
+    if (sig === lastUnreadable) return; // el mismo bloque: se avisa una sola vez
+    lastUnreadable = sig;
+    widget.log('err', `La IA escribió una llamada que no se puede leer: ${problem}.`);
+    audit('warn', 'call.unreadable', { problem, snippet });
+    const message = `[MCP_RESULT status="error"]\nNo se pudo leer tu bloque mcp_call: ${problem}. No se ejecutó nada. `
+      + 'Repite la llamada con JSON válido: un único bloque ```json con {"mcp_call":{"server":"…","name":"…","arguments":{…}}}; '
+      + 'dentro de los textos escapa las comillas como \\" y usa / en las rutas.\n[/MCP_RESULT]';
+    const sent = await adapter.sendToolResult(message, { autoSend: state.settings.autoSend });
+    if (!sent.ok) widget.log('err', sent.error);
+  }
+
   /** Nunca deja que un fallo o una llamada atascada bloquee las siguientes. */
   async function processCall(detected) {
     try {
@@ -348,6 +366,12 @@
       },
       {
         onDone: ({ text }) => {
+          // La IA intentó llamar a una herramienta pero el bloque no se puede leer: antes se ignoraba en silencio.
+          const problem = state.settings.bridgeEnabled && state.tools.length ? WMB.diagnoseMcpCall(text) : null;
+          if (problem) {
+            queue = queue.then(() => reportUnreadableCall(problem, text));
+            return;
+          }
           if (state.settings.bridgeEnabled && state.tools.length && text.length < 1500 && DENIAL.test(text)) {
             state.forceFull = true;
             widget.log('err', 'La IA dice que no tiene acceso: renovaré las instrucciones en tu próximo mensaje.');

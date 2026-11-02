@@ -198,3 +198,10 @@
   La tarjeta de aprobación muestra «Freno de seguridad» y el motivo. Si el usuario rechaza, el resultado le pide a la IA que no lo reintente y espere instrucciones. Evento de registro `call.brake`.
 - Complementa la protección del MCP de AutoCAD (`mis-mcp` PR #4): ocupado, límites, lotes, pausa y continuar, y MCPSEL.
 - Prueba: `tests/browser/test_freno.mjs` (Chromium + DeepSeek simulado; 3 fallos se ejecutan solos y la 4.ª llamada queda en espera con el aviso).
+
+## 2026-11-02 — Claude (asistente de desarrollo) · Llamadas ilegibles ya no se ignoran en silencio
+- Registro de Isabel: tras `estado` (correcto, 224 ms), DeepSeek «envía comandos» pero no hay ningún `call.detected`. La extensión no detectó la llamada: lo más probable es un bloque `mcp_call` con JSON roto (comillas sin escapar en LISP, llaves sin cerrar), que el parser descartaba sin avisar a nadie.
+- Solución:
+  - `WMB.diagnoseMcpCall(text)` detecta un intento real de llamada (`{"mcp_call":` y no la simple mención) que no se pudo leer y explica el motivo: bloque sin cerrar, JSON inválido con el mensaje del parser, falta `name` o formato incorrecto;
+  - `core_bridge`: en `onDone` (respuesta terminada sin llamadas válidas) avisa en el panel, registra `call.unreadable` (con fragmento) y envía a la IA un `[MCP_RESULT status="error"]` con el motivo y cómo corregirlo. Una sola vez por bloque.
+- Pruebas: `test_utils` (6 casos de diagnóstico) y `test_freno.mjs` (Chromium: un JSON roto no ejecuta nada y escribe el aviso en el chat).

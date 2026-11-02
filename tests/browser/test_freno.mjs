@@ -57,6 +57,24 @@ try {
   const texto = await tarjeta();
   assert.ok(texto && /Freno de seguridad/.test(texto) && /3 veces seguidas/.test(texto), `debe pedir confirmación: ${texto}`);
   assert.deepEqual(await page.evaluate(() => window.calls), [1, 2, 3], 'la 4.ª no se ejecuta sin confirmar');
+
+  // Llamada ilegible (JSON roto): antes se ignoraba en silencio; ahora se avisa a la IA en el chat
+  const page2 = await browser.newPage();
+  await page2.route('https://chat.deepseek.com/**', (route) => route.fulfill({ contentType: 'text/html', body: '<!doctype html><body><div id="chat"></div><textarea id="chat-input"></textarea></body>' }));
+  await page2.goto('https://chat.deepseek.com/a/chat/s/roto');
+  await page2.addScriptTag({ content: FAKE_CHROME });
+  for (const code of files) await page2.addScriptTag({ content: code });
+  await page2.waitForTimeout(3200);
+  await page2.evaluate(() => {
+    const div = document.createElement('div');
+    div.innerHTML = '<div class="ds-markdown">Voy a trocear: {"mcp_call":{"server":"autocad","name":"lisp","arguments":{"expresion":"(ssget "_X")"}}}</div>';
+    document.getElementById('chat').appendChild(div);
+  });
+  await page2.waitForTimeout(5000);
+  const aviso = await page2.inputValue('#chat-input');
+  assert.match(aviso, /No se pudo leer tu bloque mcp_call: JSON inválido/, `debe avisar a la IA: ${aviso}`);
+  assert.deepEqual(await page2.evaluate(() => window.calls), [], 'no se ejecuta nada');
+
   console.log('✔ test_freno: todo correcto');
 } finally {
   await browser.close();

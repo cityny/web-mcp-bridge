@@ -192,6 +192,30 @@
   /** Expuesto para tests y adaptadores. */
   WMB.repairJsonBackslashes = repairBackslashes;
 
+  /** ¿El texto CONTIENE un intento de bloque {"mcp_call": …}? (no basta con mencionar la palabra) */
+  const CALL_ATTEMPT = /\{\s*["“”]mcp_call["“”]\s*:/;
+
+  /**
+   * Si la IA escribió un bloque mcp_call que no se puede leer, explica por qué (para avisar al usuario y a la IA).
+   * @returns {string|null} motivo, o null si no hay intento de llamada o si se lee bien
+   */
+  WMB.diagnoseMcpCall = (rawText) => {
+    const text = String(rawText ?? '').replace(/[\u00a0\u200b\u2028\u2029]/g, ' ');
+    if (!CALL_ATTEMPT.test(text) || WMB.extractMcpCalls(text).length) return null;
+    const at = text.search(CALL_ATTEMPT);
+    const end = findBalancedEnd(text, at);
+    if (end === -1) return 'el bloque JSON no está cerrado (faltan llaves «}» o comillas sin cerrar)';
+    const block = text.slice(at, end + 1).replace(/[“”„‟″]/g, '"');
+    try {
+      const call = parseLenient(block)?.mcp_call;
+      if (!call || typeof call !== 'object') return '«mcp_call» debe ser un objeto {"server", "name", "arguments"}';
+      if (typeof call.name !== 'string' || !call.name) return 'falta «name» (el nombre de la herramienta)';
+      return 'formato no reconocido';
+    } catch (err) {
+      return `JSON inválido: ${String(err.message).slice(0, 160)}`;
+    }
+  };
+
   // ───────────────────────── Resultados MCP (sin omitir nada) ─────────────────────────
 
   const EXT = {
