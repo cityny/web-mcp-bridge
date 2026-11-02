@@ -65,15 +65,29 @@ try {
   await page2.addScriptTag({ content: FAKE_CHROME });
   for (const code of files) await page2.addScriptTag({ content: code });
   await page2.waitForTimeout(3200);
+  // a) Bloque a medio escribir (DeepSeek hace una pausa) que se completa 4 s después: NO es un error
+  await page2.evaluate(() => {
+    const div = document.createElement('div');
+    div.innerHTML = '<div class="ds-markdown">{"mcp_call":{"server":"autocad","name":"lisp","arguments":{"n</div>';
+    document.getElementById('chat').appendChild(div);
+  });
+  await page2.waitForTimeout(4000);
+  await page2.evaluate(() => { [...document.querySelectorAll('.ds-markdown')].at(-1).textContent += '":1000}}}'; });
+  await page2.waitForTimeout(10000);
+  assert.doesNotMatch(await page2.inputValue('#chat-input'), /No se pudo leer/, 'un bloque que se estaba escribiendo no debe dar falsa alarma');
+  assert.deepEqual(await page2.evaluate(() => window.calls), [1000], 'la llamada completa se ejecuta');
+  await page2.fill('#chat-input', '');
+
+  // b) Bloque roto de verdad (comillas sin escapar): se avisa a la IA cuando lleva unos segundos sin cambiar
   await page2.evaluate(() => {
     const div = document.createElement('div');
     div.innerHTML = '<div class="ds-markdown">Voy a trocear: {"mcp_call":{"server":"autocad","name":"lisp","arguments":{"expresion":"(ssget "_X")"}}}</div>';
     document.getElementById('chat').appendChild(div);
   });
-  await page2.waitForTimeout(5000);
+  await page2.waitForTimeout(13000);
   const aviso = await page2.inputValue('#chat-input');
   assert.match(aviso, /No se pudo leer tu bloque mcp_call: JSON inválido/, `debe avisar a la IA: ${aviso}`);
-  assert.deepEqual(await page2.evaluate(() => window.calls), [], 'no se ejecuta nada');
+  assert.equal(await page2.evaluate(() => window.calls.length), 1, 'el bloque roto no ejecuta nada');
 
   console.log('✔ test_freno: todo correcto');
 } finally {

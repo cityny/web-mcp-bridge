@@ -205,3 +205,8 @@
   - `WMB.diagnoseMcpCall(text)` detecta un intento real de llamada (`{"mcp_call":` y no la simple mención) que no se pudo leer y explica el motivo: bloque sin cerrar, JSON inválido con el mensaje del parser, falta `name` o formato incorrecto;
   - `core_bridge`: en `onDone` (respuesta terminada sin llamadas válidas) avisa en el panel, registra `call.unreadable` (con fragmento) y envía a la IA un `[MCP_RESULT status="error"]` con el motivo y cómo corregirlo. Una sola vez por bloque.
 - Pruebas: `test_utils` (6 casos de diagnóstico) y `test_freno.mjs` (Chromium: un JSON roto no ejecuta nada y escribe el aviso en el chat).
+
+## 2026-11-02 — Claude (asistente de desarrollo) · Falsa alarma de «llamada ilegible» mientras DeepSeek escribe
+- Registro de Isabel (20:25:40): aviso «bloque JSON no cerrado» y, 4 s después, la misma llamada completa detectada y ejecutada. DeepSeek hizo una pausa a mitad del bloque, el observador lo dio por terminado y el aviso se escribió en el chat a destiempo.
+- Solución: antes de avisar se espera 8 s y se comprueba que el mensaje no haya cambiado, que no se esté generando y que siga siendo ilegible.
+- Prueba (`test_freno.mjs`): bloque a medio escribir que se completa 4 s después → sin aviso y ejecutado; bloque roto de verdad → aviso a los ~8 s.
