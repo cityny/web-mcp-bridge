@@ -18,3 +18,10 @@
 - Caché de `getAssistantMessages()` de 150 ms (se invalida si algún elemento sale del DOM): `getMessageKey` e `isStreaming` dejan de recalcular la lista en cada llamada dentro del mismo análisis.
 - Decisión: NO cambiar la detección de fin de generación (`GROW_MS`) ni la heurística del botón enviar sin ver el DOM real; queda en TASK.md.
 - Nueva prueba `tests/browser/test_deepseek.mjs` (Playwright, DOM simulado): filtrado, línea base, llamada nueva una sola vez, repintado sin duplicar, ruta Windows. Falla con el adaptador anterior, pasa con el nuevo. Fuera de `npm test` porque CI no tiene Chromium.
+
+## 2026-11-02 — Claude (asistente de desarrollo) · Instalación en Windows
+- Requisitos de Isabel: Windows, Chrome, actualizaciones desde la rama `main`. Nuevos objetivos: A) instalar en su PC, B) registro de eventos para auditoría, C) actualización automática.
+- A: `INSTALL.md` + `scripts/windows/install.ps1`. Reutiliza `server/install_service.py` (arranque automático vía carpeta Inicio) en lugar de duplicarlo.
+- Decisión: el script crea `servers.json` solo con `demo`; el `default_config()` del instalador Python incluye `astrax-mcp`, que no está instalado y fallaría al conectar.
+- Decisión: el script detiene puentes anteriores (`mcp_ws_bridge.py` vía CIM) antes de arrancar; reejecutar el instalador causaba «puerto en uso» (visto en el bridge.log original). `install_service.py --uninstall` usa `taskkill` por título de ventana, que no encuentra `pythonw`: pendiente de revisar.
+- `.ps1` guardado en UTF-8 con BOM y CRLF (`.gitattributes`) para PowerShell 5.1. No se pudo ejecutar aquí (sin PowerShell): requiere prueba en Windows.
