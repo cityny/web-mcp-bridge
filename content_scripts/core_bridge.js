@@ -251,8 +251,19 @@
 
   let lastUnreadable = '';
 
-  /** Avisa (panel, registro y a la propia IA) de un bloque mcp_call ilegible, para que la IA lo corrija. */
-  async function reportUnreadableCall(problem, text) {
+  const UNREADABLE_SETTLE_MS = 8000;
+
+  /**
+   * Avisa (panel, registro y a la propia IA) de un bloque mcp_call ilegible, para que la IA lo corrija.
+   * Antes espera a que el mensaje lleve UNREADABLE_SETTLE_MS sin cambiar: DeepSeek hace pausas al escribir y un
+   * bloque a medio escribir parecía «no cerrado» (falsa alarma que se colaba en el chat).
+   */
+  async function reportUnreadableCall(firstText, element) {
+    await WMB.sleep(UNREADABLE_SETTLE_MS);
+    const text = (element?.isConnected ? element.textContent : null) ?? firstText;
+    if (text !== firstText || adapter.isStreaming()) return; // siguió escribiendo: el observador lo volverá a ver
+    const problem = WMB.diagnoseMcpCall(text);
+    if (!problem) return; // al final era una llamada válida
     const at = text.search(/\{\s*["“”]mcp_call/);
     const snippet = text.slice(at, at + 300);
     const sig = WMB.hash(snippet);
@@ -365,11 +376,11 @@
         queue = queue.then(() => processCall(detected));
       },
       {
-        onDone: ({ text }) => {
+        onDone: ({ text, element }) => {
           // La IA intentó llamar a una herramienta pero el bloque no se puede leer: antes se ignoraba en silencio.
           const problem = state.settings.bridgeEnabled && state.tools.length ? WMB.diagnoseMcpCall(text) : null;
           if (problem) {
-            queue = queue.then(() => reportUnreadableCall(problem, text));
+            queue = queue.then(() => reportUnreadableCall(text, element));
             return;
           }
           if (state.settings.bridgeEnabled && state.tools.length && text.length < 1500 && DENIAL.test(text)) {

@@ -3,6 +3,7 @@
 ## En curso
 
 ## Pendiente
+- [ ] Deduplicación de llamadas en conversaciones largas de DeepSeek: capturar HTML real (mensajes de usuario) antes de cambiarla (ver LOG)
 - [ ] Fusionar el PR #2 y cambiar la carpeta de Isabel a `main` (`git checkout main`) para que funcione la actualización automática
 - [ ] Probar en Windows: tarea programada `WebMCPBridge-Update` y recarga automática de la extensión
 - [ ] Probar AutoCAD desde DeepSeek (Isabel)
