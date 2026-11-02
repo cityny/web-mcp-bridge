@@ -48,3 +48,8 @@
 - `install.ps1` comprueba ahora la respuesta real del puente (`type: "servers"`) con Python + websockets y lista los MCP configurados. Verificado contra el puente real (OK) y contra otro programa en el puerto (rechazado).
 - El log explica que, si el puerto está ocupado, los MCP siguen funcionando pero no se pueden detectar.
 - Nota: en PowerShell 5.1, `Get-Content` necesita `-Encoding UTF8` para leer bien `bridge.log`.
+
+## 2026-11-02 — Claude (asistente de desarrollo) · Fallo de install.ps1 en PowerShell 5.1
+- Error en el PC de Isabel: `python -c $probe` → SyntaxError. PowerShell 5.1 quita las comillas dobles de los argumentos que pasa a programas nativos, y además `2>$null` con `$ErrorActionPreference = 'Stop'` corta el script ante cualquier salida en stderr.
+- Solución: la comprobación pasa a un archivo propio, `scripts/windows/check_bridge.py`, y durante esa llamada se usa `ErrorActionPreference = 'Continue'`. Probado contra el puente real (lista los MCP) y sin puente (código 1).
+- Lección: en scripts .ps1 no pasar código con `-c` a programas nativos; usar archivos.

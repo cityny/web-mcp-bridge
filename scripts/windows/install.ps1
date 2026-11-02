@@ -76,23 +76,16 @@ if ($LASTEXITCODE -ne 0) { Fail 'install_service.py fallo (mira el mensaje anter
 
 # 4) Verificar que responde EL PUENTE (no otro programa que use el mismo puerto)
 Step 'Comprobando que el puente responde (descubrimiento en 127.0.0.1:47615)'
-$probe = @'
-import asyncio, json, sys, websockets
-async def main():
-    async with websockets.connect("ws://127.0.0.1:47615", open_timeout=3) as ws:
-        msg = json.loads(await asyncio.wait_for(ws.recv(), 3))
-    assert msg.get("type") == "servers"
-    print(", ".join(f"{s['name']} ({s['port']})" for s in msg["servers"]) or "(ninguno)")
-try:
-    asyncio.run(main())
-except Exception:
-    sys.exit(1)
-'@
+# Script aparte: PowerShell 5.1 borra las comillas dobles al pasar codigo con -c a python.exe
+$probe = Join-Path $Repo 'scripts\windows\check_bridge.py'
 $servers = $null
 for ($i = 0; $i -lt 10 -and -not $servers; $i++) {
   Start-Sleep -Seconds 1
-  $out = & $Python -c $probe 2>$null
-  if ($LASTEXITCODE -eq 0) { $servers = ($out -join ' ') }
+  $ErrorActionPreference = 'Continue'   # un fallo de python no debe cortar el script
+  $out = & $Python $probe 2>$null
+  $code = $LASTEXITCODE
+  $ErrorActionPreference = 'Stop'
+  if ($code -eq 0) { $servers = ($out -join ' ') }
 }
 if ($servers) { Ok "Puente activo. MCP configurados: $servers" }
 else { Write-Host "  AVISO  El puente no responde en 47615. Revisa: Get-Content server\bridge.log -Tail 20 -Encoding UTF8" -ForegroundColor Yellow }
