@@ -173,3 +173,19 @@
   - `tests/test_http.mjs`: SSE, sesión, 202, error del servidor, reinicio con 404, puerta cerrada, DELETE;
   - `test_bridge_config`: entradas URL;
   - Chromium con FastMCP real: migración automática de autocad a HTTP, conexión sin 403 y llamada a `zoom`.
+
+## 2026-11-02 — Claude (asistente de desarrollo) · Análisis del registro de Isabel (uso real con AutoCAD)
+- Funciona:
+  - la actualización automática hizo dos recargas solas (`47f3704 → 12208e9 → abea24b`);
+  - la migración de `autocad` a HTTP directo (`server.moved` → conectado con 16 herramientas, sin mcp-proxy);
+  - decenas de llamadas `lisp`, `estado` y `capas` correctas.
+- Errores observados:
+  1. Dos `tools/call` agotaron el límite de 120 s, y un `ERASE` sobre un dibujo de ~147.000 entidades tardó 82 s. Con 120 s, operaciones legítimas fallan y la IA repite órdenes mientras AutoCAD sigue ocupado.
+  2. Algunas expresiones LISP de la IA dejan AutoCAD ocupado o esperando (`ssget "_X"` con filtros de punto exactos, `command "_.EXPLODE"` sin cerrar). Es un problema del lado AutoCAD/LISP, no de la extensión.
+  3. El registro se llenaba con `action.discover_servers` cada 20 s (panel lateral abierto).
+- Cambios:
+  - ajuste «Tiempo máximo por herramienta» (por defecto 300 s, de 10 a 1800);
+  - el mensaje de tiempo agotado le dice a la IA que AutoCAD puede seguir ocupado y que no repita la orden;
+  - la detección solo se registra cuando aparece un MCP nuevo;
+  - `bridge.config_saved` muestra la URL de los MCP HTTP en vez de `undefined`.
+- Propuesta para el MCP de AutoCAD (repo aparte, pendiente de subir): herramientas específicas con límites (contar o seleccionar por capa/tipo, borrar con confirmación, cancelar comando activo) en vez de depender de LISP libre.

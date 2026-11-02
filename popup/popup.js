@@ -276,6 +276,7 @@ function renderSettings(settings) {
   $('#set-autoUpdate').checked = settings.autoUpdate !== false;
   if (document.activeElement?.id !== 'set-maxResultChars') $('#set-maxResultChars').value = settings.maxResultChars;
   if (document.activeElement?.id !== 'set-reinjectEvery') $('#set-reinjectEvery').value = settings.reinjectEvery;
+  if (document.activeElement?.id !== 'set-toolTimeoutSec') $('#set-toolTimeoutSec').value = settings.toolTimeoutSec ?? 300;
 }
 
 function renderUpdate(update) {
@@ -361,6 +362,10 @@ for (const key of ['autoInject', 'autoSend', 'reminder', 'focusFallback', 'prefe
 $('#set-reinjectEvery').addEventListener('change', guard((e) => {
   const value = Math.min(100, Math.max(0, Math.round(Number(e.target.value)) || 0));
   return api('UPDATE_SETTINGS', { settings: { reinjectEvery: value } });
+}));
+$('#set-toolTimeoutSec').addEventListener('change', guard((e) => {
+  const value = Math.min(1800, Math.max(10, Math.round(Number(e.target.value)) || 300));
+  return api('UPDATE_SETTINGS', { settings: { toolTimeoutSec: value } });
 }));
 $('#set-maxResultChars').addEventListener('change', guard((e) => {
   const value = Math.min(100000, Math.max(500, Number(e.target.value) || 12000));

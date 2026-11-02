@@ -44,6 +44,8 @@ export const DEFAULT_SETTINGS = {
   preferSidePanel: false,
   /** Recargar la extensión sola cuando la tarea de actualización baja una versión nueva (update-stamp.json). */
   autoUpdate: true,
+  /** Tiempo máximo (segundos) que se espera a una herramienta. Operaciones grandes de AutoCAD pueden tardar minutos. */
+  toolTimeoutSec: 300,
 };
 
 /** El servidor de prueba incluido en el repositorio (server/examples/demo_mcp_server.py). */

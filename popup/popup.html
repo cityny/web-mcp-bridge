@@ -182,6 +182,11 @@
         <small>Lo que pase de este límite se adjunta completo como archivo.</small>
         <input type="number" id="set-maxResultChars" min="500" max="100000" step="500">
       </label>
+      <label class="setting column">
+        <strong>Tiempo máximo por herramienta (segundos)</strong>
+        <small>Operaciones grandes (p. ej. borrar o copiar miles de entidades en AutoCAD) pueden tardar minutos. Entre 10 y 1800.</small>
+        <input type="number" id="set-toolTimeoutSec" min="10" max="1800" step="10">
+      </label>
       <label class="setting">
         <input type="checkbox" id="set-focusFallback">
         <span>
