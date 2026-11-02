@@ -7,9 +7,11 @@
  *   3. Exponer a popup y content scripts una API de mensajes (ver `handleMessage`).
  */
 import { McpConnection } from './ws_client.js';
+import { log, getLogs, clearLogs } from './logger.js';
 import {
   STORAGE_KEYS as KEYS, DEFAULT_SETTINGS, MAX_ACTIVE_SERVERS,
   CALL_TIMEOUT_MS, HISTORY_LIMIT, SUPPORTED_URL_PATTERNS, PERMISSIONS,
+  DISCOVERY_URL, DISCOVERY_TIMEOUT_MS,
 } from '../shared/constants.js';
 
 /** @type {Map<string, McpConnection>} serverId → conexión */
@@ -70,7 +72,28 @@ function scheduleBroadcast() {
   }, 300);
 }
 
-function onConnectionChange(evt) {
+/** Último estado registrado por servidor: evita llenar el registro con cada reintento de reconexión. */
+const lastLogged = new Map();
+
+function logConnection(conn, evt) {
+  const name = conn.server.name;
+  if (evt.kind === 'tools') {
+    log('info', 'server.tools', { server: name, tools: conn.tools.length });
+    return;
+  }
+  if (evt.next === 'connected') {
+    lastLogged.set(conn.server.id, 'up');
+    log('info', 'server.connected', { server: name, url: conn.server.url, info: conn.serverInfo?.name });
+  } else if (evt.next === 'error' || evt.next === 'disconnected') {
+    const key = `down:${conn.lastError ?? ''}`;
+    if (lastLogged.get(conn.server.id) === key) return;
+    lastLogged.set(conn.server.id, key);
+    log(evt.prev === 'connected' ? 'warn' : 'error', 'server.down', { server: name, url: conn.server.url, error: conn.lastError });
+  }
+}
+
+function onConnectionChange(evt, conn) {
+  if (conn) logConnection(conn, evt);
   if (evt.kind === 'tools' || evt.prev === 'connected' || evt.next === 'connected') scheduleBroadcast();
 }
 
@@ -91,6 +114,8 @@ async function reconcile() {
     if (!target || target.url !== conn.server.url) {
       conn.close();
       connections.delete(id);
+      lastLogged.delete(id);
+      log('info', 'server.closed', { server: conn.server.name });
     }
   }
   for (const [id, server] of wanted) {
@@ -98,7 +123,7 @@ async function reconcile() {
     if (existing) {
       existing.server = server;
     } else {
-      const conn = new McpConnection(server, onConnectionChange);
+      const conn = new McpConnection(server, (evt) => onConnectionChange(evt, conn));
       connections.set(id, conn);
       conn.connect();
     }
@@ -172,6 +197,7 @@ async function callTool({ server, name, arguments: args }) {
   const label = target ? slugs.get(target.id) : (server ?? '?');
   const entry = { ts: Date.now(), server: label, tool: name, args: JSON.stringify(args ?? {}).slice(0, 300) };
   const fail = async (error) => {
+    log('error', 'tool.call', { server: label, tool: name, error });
     await addHistory({ ...entry, status: 'error', error });
     return { ok: false, error };
   };
@@ -186,12 +212,43 @@ async function callTool({ server, name, arguments: args }) {
   const started = Date.now();
   try {
     const result = await conn.callTool(name, args, CALL_TIMEOUT_MS);
-    await addHistory({ ...entry, status: result?.isError ? 'error' : 'ok', ms: Date.now() - started });
+    const ms = Date.now() - started;
+    log(result?.isError ? 'warn' : 'info', 'tool.call', { server: label, tool: name, status: result?.isError ? 'error' : 'ok', ms, args: entry.args });
+    await addHistory({ ...entry, status: result?.isError ? 'error' : 'ok', ms });
     return { ok: true, result };
   } catch (err) {
+    log('error', 'tool.call', { server: label, tool: name, error: err.message, ms: Date.now() - started });
     await addHistory({ ...entry, status: 'error', error: err.message, ms: Date.now() - started });
     return { ok: false, error: err.message };
   }
+}
+
+// ───────────────────────── Descubrimiento de MCP del PC ─────────────────────────
+
+/** Pide al puente local la lista de MCP configurados en servers.json. */
+function fetchDiscovery(url = DISCOVERY_URL, timeout = DISCOVERY_TIMEOUT_MS) {
+  return new Promise((resolve, reject) => {
+    let ws;
+    const timer = setTimeout(() => { try { ws?.close(); } catch { /* noop */ } reject(new Error('El puente no respondió. ¿Está en marcha?')); }, timeout);
+    const done = (fn, value) => { clearTimeout(timer); try { ws.close(); } catch { /* noop */ } fn(value); };
+    try { ws = new WebSocket(url); } catch (err) { clearTimeout(timer); reject(err); return; }
+    ws.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+        if (msg?.type !== 'servers' || !Array.isArray(msg.servers)) throw new Error('Respuesta inesperada del puente.');
+        done(resolve, msg.servers);
+      } catch (err) { done(reject, err); }
+    };
+    ws.onerror = () => done(reject, new Error(`No se pudo contactar con el puente local (${url}).`));
+  });
+}
+
+/** Puerto de una dirección ws:// local, o null si no es local. */
+function localPort(raw) {
+  try {
+    const url = new URL(raw);
+    return ['localhost', '127.0.0.1'].includes(url.hostname) ? Number(url.port || 80) : null;
+  } catch { return null; }
 }
 
 // ───────────────────────── Mutaciones (desde el popup) ─────────────────────────
@@ -201,6 +258,13 @@ function validateUrl(raw) {
   try { url = new URL(raw); } catch { throw new Error('La dirección no es válida.'); }
   if (!['ws:', 'wss:'].includes(url.protocol)) throw new Error('La dirección debe empezar por ws:// o wss://');
   return url.toString().replace(/\/$/, '');
+}
+
+/** Ajustes y cambios de configuración que se registran (sin datos sensibles). */
+function describeMutation(msg) {
+  const { type, ...rest } = msg;
+  if (type === 'UPDATE_SETTINGS') return { settings: rest.settings };
+  return rest;
 }
 
 const mutate = (fn) => withLock(async () => {
@@ -261,6 +325,26 @@ const mutations = {
     await saveServers(servers);
   }),
 
+  /**
+   * Registra los MCP que el puente tiene configurados y aún no están en la lista.
+   * Se añaden DESACTIVADOS: el usuario elige cuáles activar con su interruptor.
+   */
+  DISCOVER_SERVERS: () => mutate(async (servers, settings) => {
+    const found = await fetchDiscovery();
+    const known = new Set(servers.map((s) => localPort(s.url)).filter(Boolean));
+    const added = [];
+    for (const item of found) {
+      const port = Number(item?.port);
+      if (!Number.isInteger(port) || port <= 0 || known.has(port)) continue;
+      const name = String(item.name ?? '').trim().slice(0, 40) || `mcp-${port}`;
+      servers.push({ id: crypto.randomUUID(), name, url: `ws://localhost:${port}`, enabled: false, permission: settings.defaultPermission });
+      known.add(port);
+      added.push(name);
+    }
+    if (added.length) await saveServers(servers);
+    return { ok: true, found: found.length, added };
+  }),
+
   UPDATE_SETTINGS: ({ settings: patch }) => mutate(async (_servers, settings) => {
     await chrome.storage.local.set({ [KEYS.settings]: { ...settings, ...patch } });
   }),
@@ -301,6 +385,14 @@ async function handleMessage(msg, sender) {
       const data = await chrome.storage.local.get(KEYS.history);
       return { ok: true, history: data[KEYS.history] ?? [] };
     }
+    case 'LOG': // eventos de los content scripts y del popup
+      log(msg.level, msg.event, msg.details, { source: sourceOf(sender), platform: msg.platform });
+      return { ok: true };
+    case 'GET_LOGS': return { ok: true, logs: await getLogs() };
+    case 'CLEAR_LOGS':
+      await clearLogs();
+      log('info', 'logs.cleared');
+      return { ok: true };
     case 'CLEAR_HISTORY':
       await chrome.storage.local.remove(KEYS.history);
       return { ok: true };
@@ -314,10 +406,25 @@ async function handleMessage(msg, sender) {
   }
 }
 
+/** Origen de un mensaje: el popup (o el panel lateral) también puede abrirse en una pestaña con URL chrome-extension://. */
+const sourceOf = (sender) => (sender?.tab && !String(sender.url ?? '').startsWith('chrome-extension://') ? 'content' : 'popup');
+
+/** Mensajes que NO se registran (frecuentes o de solo lectura). */
+const QUIET = new Set(['SLEEP', 'GET_STATE', 'GET_ACTIVE_TOOLS', 'GET_HISTORY', 'GET_LOGS', 'CLEAR_LOGS', 'LOG', 'CALL_TOOL', 'FOCUS_TAB', 'RESTORE_FOCUS']);
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   handleMessage(msg, sender)
-    .then(sendResponse)
-    .catch((err) => sendResponse({ ok: false, error: err?.message ?? String(err) }));
+    .then((res) => {
+      if (!QUIET.has(msg?.type)) {
+        const level = res?.ok === false ? 'warn' : 'info';
+        log(level, `action.${String(msg?.type).toLowerCase()}`, { ...describeMutation(msg), ...(res?.ok === false ? { error: res.error } : {}) }, { source: sourceOf(sender) });
+      }
+      sendResponse(res);
+    })
+    .catch((err) => {
+      log('error', `action.${String(msg?.type).toLowerCase()}`, { ...describeMutation(msg ?? {}), error: err?.message ?? String(err) }, { source: sourceOf(sender) });
+      sendResponse({ ok: false, error: err?.message ?? String(err) });
+    });
   return true; // respuesta asíncrona
 });
 
@@ -333,7 +440,8 @@ chrome.runtime.onInstalled.addListener(async () => {
 // Red de seguridad: si el SW se duerme, la alarma lo despierta y reconecta.
 chrome.alarms.create('wmb-keepalive', { periodInMinutes: 0.5 });
 chrome.alarms.onAlarm.addListener((alarm) => {
-  if (alarm.name === 'wmb-keepalive') reconcile().catch(() => {});
+  if (alarm.name === 'wmb-keepalive') reconcile().catch((err) => log('error', 'reconcile', { error: err.message }));
 });
 
-reconcile().catch((err) => console.error('[WMB] reconcile', err));
+log('info', 'sw.start', { version: chrome.runtime.getManifest?.().version });
+reconcile().catch((err) => { console.error('[WMB] reconcile', err); log('error', 'reconcile', { error: err.message }); });

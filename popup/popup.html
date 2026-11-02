@@ -22,6 +22,7 @@
   <nav class="tabs" role="tablist">
     <button role="tab" data-tab="servers" aria-selected="true">Servidores</button>
     <button role="tab" data-tab="history" aria-selected="false">Historial</button>
+    <button role="tab" data-tab="logs" aria-selected="false">Registro</button>
     <button role="tab" data-tab="settings" aria-selected="false">Ajustes</button>
   </nav>
 
@@ -54,8 +55,13 @@
         <button id="add-demo" type="button" class="ghost">Añadir servidor de prueba (demo, ws://localhost:8090)</button>
       </div>
 
+      <div class="discover">
+        <button id="discover" type="button" class="primary">Detectar MCP del PC</button>
+        <small class="muted">Lee los MCP de <code>server/servers.json</code>. Se añaden desactivados: actívalos con su interruptor.</small>
+      </div>
+
       <form id="add-form" class="add-form" autocomplete="off">
-        <h2>Añadir servidor MCP</h2>
+        <h2>Añadir servidor MCP manualmente</h2>
         <input id="add-name" type="text" placeholder="Nombre (p. ej. astrax-mcp)" maxlength="40" required>
         <input id="add-url" type="text" placeholder="ws://localhost:8080" spellcheck="false" required>
         <button type="submit" class="primary">Añadir servidor</button>
@@ -70,6 +76,25 @@
       </div>
       <ul id="history-list" class="history-list"></ul>
       <p id="history-empty" class="muted" hidden>Todavía no se ha ejecutado ninguna herramienta.</p>
+    </section>
+
+    <!-- ───── Registro (auditoría) ───── -->
+    <section id="tab-logs" hidden>
+      <div class="summary">
+        <strong>Registro de eventos</strong>
+        <span class="log-actions">
+          <select id="log-level" aria-label="Filtrar por nivel">
+            <option value="all">Todo</option>
+            <option value="warn">Avisos y errores</option>
+            <option value="error">Solo errores</option>
+          </select>
+          <button id="export-logs" class="ghost" type="button">Exportar JSON</button>
+          <button id="clear-logs" class="ghost" type="button">Borrar</button>
+        </span>
+      </div>
+      <p id="log-count" class="muted"></p>
+      <ul id="log-list" class="history-list log-list"></ul>
+      <p id="log-empty" class="muted" hidden>Sin eventos todavía.</p>
     </section>
 
     <!-- ───── Ajustes ───── -->

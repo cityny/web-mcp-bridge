@@ -13,7 +13,11 @@ export const STORAGE_KEYS = {
   servers: 'wmb_servers',
   settings: 'wmb_settings',
   history: 'wmb_history',
+  logs: 'wmb_logs',
 };
+
+/** Máximo de entradas del registro de eventos (las más antiguas se descartan). */
+export const LOG_LIMIT = 2000;
 
 /** Permisos por MCP: allow = nunca pregunta · ask = pregunta en cada llamada · deny = bloqueado. */
 export const PERMISSIONS = ['allow', 'ask', 'deny'];
@@ -40,6 +44,10 @@ export const DEFAULT_SETTINGS = {
 
 /** El servidor de prueba incluido en el repositorio (server/examples/demo_mcp_server.py). */
 export const DEMO_SERVER = { name: 'demo', url: 'ws://localhost:8090' };
+
+/** Canal de descubrimiento del puente local: devuelve los MCP configurados en server/servers.json. */
+export const DISCOVERY_URL = 'ws://127.0.0.1:47615';
+export const DISCOVERY_TIMEOUT_MS = 3000;
 
 export const PROTOCOL_VERSION = '2025-03-26';
 export const CALL_TIMEOUT_MS = 120_000;

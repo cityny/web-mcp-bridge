@@ -62,8 +62,19 @@
     },
   });
 
+  /** Registro de auditoría (en el service worker). Nunca incluye el texto de tus mensajes. */
+  const audit = (level, event, details) => { send({ type: 'LOG', level, event, details, platform: adapter.id }); };
+
+  // Todo lo que se muestra en el panel flotante también queda en el registro.
+  const showLog = widget.log.bind(widget);
+  widget.log = (kind, message) => {
+    showLog(kind, message);
+    audit(kind === 'err' ? 'warn' : 'info', 'chat.panel', { message });
+  };
+
   // Los adaptadores pueden escribir mensajes de depuración en el panel flotante (p. ej. ChatGPT).
   adapter.debug = (kind, message) => widget.log(kind, message);
+  audit('info', 'chat.start', { adapter: adapter.name, path: location.pathname });
 
   function injectionStatus() {
     if (document.body.textContent.includes(`[WMB:${WMB.toolsSignature(state.tools)}]`)) return 'ok';
@@ -139,6 +150,9 @@
     }
     const tail = reminder !== false && state.tools.length ? `\n${WMB.reminderLine(state.tools, 'result')}` : '';
     const sent = await adapter.sendToolResult(`${plan.build(attached)}${tail}`, { autoSend, settleMs: attached && plan.files.length ? 1500 : 0 });
+    audit(sent.ok ? 'info' : 'error', 'result.delivered', {
+      server: srv.slug, tool: call.name, status, ok: sent.ok, error: sent.error, files: plan.files.length, attached,
+    });
     widget.log(sent.ok ? 'ok' : 'err', sent.ok ? `Resultado enviado a ${adapter.name}.` : sent.error);
   }
 
@@ -162,6 +176,7 @@
   /** Procesa una llamada MCP detectada en la respuesta de la IA. */
   async function handleCall({ call }) {
     if (!state.settings.bridgeEnabled) return; // bridge apagado: se ignoran las llamadas
+    audit('info', 'call.detected', { server: call.server, tool: call.name, args: JSON.stringify(call.arguments ?? {}) });
     const { srv, tool } = await resolveCall(call);
 
     // Llamada que no corresponde a ningún MCP activo (p. ej. la IA explicando el formato): se ignora.
@@ -182,6 +197,7 @@
       if (srv.permission === 'ask') {
         const answer = await widget.requestApproval({ server: srv.slug, name: call.name, arguments: call.arguments });
         approved = Boolean(answer);
+        audit('info', 'call.approval', { server: srv.slug, tool: call.name, answer: answer || 'reject' });
         if (answer === 'always') {
           await send({ type: 'SET_PERMISSION', id: srv.id, permission: 'allow' });
           await refresh();
@@ -213,6 +229,7 @@
       await handleCall(detected);
     } catch (err) {
       widget.log('err', `Error: ${err.message}`);
+      audit('error', 'call.failed', { tool: detected?.call?.name, error: err.message, stack: String(err.stack ?? '').split('\n').slice(0, 3).join(' | ') });
     }
   }
 

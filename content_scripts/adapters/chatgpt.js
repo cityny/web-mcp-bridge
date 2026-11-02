@@ -49,89 +49,14 @@
     return out;
   }
 
-  /** Objetos JSON completos y válidos dentro de un texto (ignora lo que rodea al JSON). */
-  function findJsonObjects(text) {
-    const found = [];
-    for (let i = 0; i < text.length; i += 1) {
-      if (text[i] !== '{') continue;
-      let depth = 0; let inString = false; let escaped = false;
-      for (let j = i; j < text.length; j += 1) {
-        const ch = text[j];
-        if (inString) {
-          if (escaped) escaped = false;
-          else if (ch === '\\') escaped = true;
-          else if (ch === '"') inString = false;
-          continue;
-        }
-        if (ch === '"') inString = true;
-        else if (ch === '{') depth += 1;
-        else if (ch === '}') {
-          depth -= 1;
-          if (depth === 0) {
-            try { found.push(JSON.parse(text.slice(i, j + 1))); i = j; } catch { /* no era JSON válido */ }
-            break;
-          }
-        }
-      }
-    }
-    return found;
-  }
-
-  /** Arregla barras invertidas que el Markdown dejó sueltas dentro de strings JSON. */
-  function fixString(raw) {
-    // Ruta de Windows (C:\...): todas las barras son separadores literales.
-    if (/^[A-Za-z]:\\/.test(raw)) return raw.replace(/\\+/g, '\\\\');
-    // Resto: duplica solo las barras que no forman un escape JSON válido.
-    return raw.replace(/\\(["\\/bfnrt]|u[0-9a-fA-F]{4})|\\/g, (m, valid) => (valid ? m : '\\\\'));
-  }
-
-  function repairBackslashes(text) {
-    let out = ''; let i = 0;
-    while (i < text.length) {
-      if (text[i] !== '"') { out += text[i]; i += 1; continue; }
-      let j = i + 1; let raw = '';
-      while (j < text.length && text[j] !== '"') {
-        if (text[j] === '\\' && j + 1 < text.length) { raw += text[j] + text[j + 1]; j += 2; }
-        else { raw += text[j]; j += 1; }
-      }
-      out += '"' + fixString(raw) + '"';
-      i = j + 1;
-    }
-    return out;
-  }
-
-  /** Llamadas MCP de un texto: parser de la extensión; si falla, se reparan comillas/barras y se reintenta. */
-  function parseCalls(text) {
-    try {
-      const direct = WMB.extractMcpCalls(text);
-      if (direct?.length) return direct;
-    } catch { /* se prueban las variantes */ }
-
-    const clean = text.replace(/[“”]/g, '"').replace(/\u00a0/g, ' ');
-    for (const variant of [text, repairBackslashes(clean)]) {
-      for (const obj of findJsonObjects(variant)) {
-        if (!obj || typeof obj !== 'object' || !('mcp_call' in obj)) continue;
-        try {
-          const normalized = WMB.extractMcpCalls('```json\n' + JSON.stringify(obj) + '\n```');
-          if (normalized?.length) return normalized;
-        } catch { /* siguiente candidato */ }
-      }
-    }
-    return [];
-  }
-
   /**
-   * Texto que verá el observador base: el del mensaje y, si su JSON estaba roto por el Markdown,
-   * la llamada reparada añadida al final (determinista: el mismo mensaje da siempre el mismo texto).
+   * Llamadas MCP de un texto. La reparación de barras invertidas y comillas tipográficas
+   * vive ahora en `WMB.extractMcpCalls` (utils.js) y la comparten todos los adaptadores.
    */
-  function messageText(element) {
-    const text = extractText(element);
-    if (!text.includes('mcp_call')) return text;
-    try { if (WMB.extractMcpCalls(text).length) return text; } catch { /* se intenta reparar */ }
-    const calls = parseCalls(text);
-    if (!calls.length) return text;
-    return `${text}\n${calls.map((call) => '```json\n' + JSON.stringify({ mcp_call: call }) + '\n```').join('\n')}`;
-  }
+  const parseCalls = (text) => WMB.extractMcpCalls(text);
+
+  /** Texto que verá el observador base (con saltos de línea por bloque; el parser compartido repara el JSON). */
+  const messageText = (element) => extractText(element);
 
   /** Envuelve el elemento para que `textContent` devuelva el texto reconstruido (el resto se delega tal cual). */
   function wrap(element) {

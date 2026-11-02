@@ -23,14 +23,22 @@
   'use strict';
   const WMB = globalThis.WMB;
 
-  /** Bloques de «razonamiento» (DeepThink): su texto no cuenta como respuesta. */
-  const THINK_SEL = '.ds-think-content, [class*="think" i], [class*="reasoning" i]';
+  /** Bloque de «razonamiento» (DeepThink) con clase conocida: se busca en todo el árbol. */
+  const THINK_SEL = '.ds-think-content';
+  /**
+   * Clases genéricas de razonamiento: solo como PALABRA completa (`think`, `ds-thinking`, `reasoning_box`…, nunca
+   * `unthinkable`) y solo en los ancestros cercanos, para que una clase global de la página («thinking-enabled» en
+   * el <body>) no haga pasar todas las respuestas por razonamiento.
+   */
+  const THINK_CLASS = /(^|[\s_-])(think|thinking|deepthink|reasoning)([\s_-]|$)/i;
+  const THINK_DEPTH = 6;
   /** Cabecera corta que precede al razonamiento («Thought for 5 seconds», «Pensó durante 5 segundos»…). */
   const THINK_HEADER = /^(thought|thinking|deepthink|pens[óo]|pensando|razon|reasoning)/i;
   /** Botones de icono (enviar, adjuntar, detener) y, como alternativa, cualquier botón ARIA. */
   const ICON_BUTTONS = ['div[role="button"].ds-icon-button', 'button.ds-icon-button', '.ds-icon-button'];
   const ANY_BUTTONS = ['div[role="button"]', 'button'];
 
+  const MESSAGES_CACHE_MS = 150; // la lista de mensajes se reutiliza dentro de un mismo análisis
   const GROW_MS = 2000;          // el último mensaje creció hace menos de esto → se está generando
   const FRESH_CHAT_MS = 120_000; // un chat nuevo recibe su URL poco después del primer envío
   const LOCK_SENT_MS = 90_000;   // cerrojo: tras enviar el resultado, máximo este tiempo
@@ -42,6 +50,10 @@
   /** ¿Es un bloque de razonamiento (no la respuesta)? */
   function isThinking(el) {
     if (el.closest(THINK_SEL) || el.querySelector(THINK_SEL)) return true;
+    for (let node = el, depth = 0; node && node !== document.body && depth < THINK_DEPTH; node = node.parentElement, depth += 1) {
+      const cls = typeof node.className === 'string' ? node.className : '';
+      if (cls && THINK_CLASS.test(cls)) return true;
+    }
     for (let node = el, depth = 0; node && depth < 3; node = node.parentElement, depth += 1) {
       const head = (node.previousElementSibling?.textContent || '').trim();
       if (head && head.length < 45 && THINK_HEADER.test(head)) return true;
@@ -55,6 +67,7 @@
     #hashCache = new WeakMap();                  // elemento → {text, set} (hashes de sus llamadas)
     #lock = null;                                // { hash, firedAt, sentAt, newGen }
     #grow = { el: null, len: 0, at: 0 };         // seguimiento del crecimiento del último mensaje
+    #messages = { at: 0, list: [] };             // caché corta de getAssistantMessages()
 
     constructor() {
       super({
@@ -109,12 +122,26 @@
 
     getAssistantMessages() {
       this.#syncConversation();
+      const now = Date.now();
+      if (now - this.#messages.at < MESSAGES_CACHE_MS && this.#messages.list.every((el) => el.isConnected)) {
+        return this.#messages.list;
+      }
       const found = super.getAssistantMessages();
       const answers = found.filter((el) => !isThinking(el));
       // Si el filtro lo quitara todo, es mejor no filtrar que quedarse ciego.
       const list = answers.length || !found.length ? answers : found;
-      // Sin contenedores anidados (evita duplicados con selectores amplios).
-      return list.filter((el) => !list.some((other) => other !== el && el.contains(other)));
+      // Sin contenedores anidados (evita duplicados con selectores amplios): se queda el más interno.
+      // Coste lineal: cada elemento sube por sus ancestros buscando otro de la lista.
+      const members = new Set(list);
+      const hasInner = new Set();
+      for (const el of list) {
+        for (let node = el.parentElement; node; node = node.parentElement) {
+          if (members.has(node)) hasInner.add(node);
+        }
+      }
+      const result = list.filter((el) => !hasInner.has(el));
+      this.#messages = { at: now, list: result };
+      return result;
     }
 
     /** Hashes de las llamadas MCP de un mensaje (con caché por texto). */

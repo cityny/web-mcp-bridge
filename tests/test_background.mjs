@@ -6,6 +6,8 @@ const store = {};
 const focusLog = [];
 let onMessage;
 let installed;
+const realWarn = console.warn;
+console.warn = () => {}; // los errores esperados del registro no ensucian la salida
 globalThis.chrome = {
   storage: { local: {
     get: async (keys) => Object.fromEntries([].concat(keys).filter((k) => k in store).map((k) => [k, structuredClone(store[k])])),
@@ -108,5 +110,22 @@ assert.deepEqual(focus.prev, { tabId: 7, windowId: 70 });
 await call({ type: 'RESTORE_FOCUS', prev: focus.prev });
 assert.deepEqual(focusLog, [['tab', 3, true], ['win', 30, true], ['tab', 7, true], ['win', 70, true]]);
 
+// 9) Registro de eventos: llamadas, cambios de configuración y eventos del chat; recorte de textos y borrado
+let logs = (await call({ type: 'GET_LOGS' })).logs;
+const events = new Set(logs.map((l) => l.event));
+for (const e of ['sw.start', 'server.connected', 'tool.call', 'action.set_permission', 'action.add_server']) assert.ok(events.has(e), `falta el evento ${e}`);
+assert.ok(logs.some((l) => l.event === 'tool.call' && l.level === 'error'), 'una llamada bloqueada se registra como error');
+assert.ok(!events.has('action.get_state') && !events.has('action.sleep'), 'las consultas frecuentes no se registran');
+await call({ type: 'LOG', level: 'warn', event: 'chat.panel', platform: 'deepseek', details: { message: 'x'.repeat(1000) } }, { tab: { id: 1 } });
+logs = (await call({ type: 'GET_LOGS' })).logs;
+const fromChat = logs.at(-1);
+assert.equal(fromChat.source, 'content');
+assert.equal(fromChat.platform, 'deepseek');
+assert.ok(fromChat.details.message.length < 400, 'los textos largos se recortan');
+assert.equal((await call({ type: 'CLEAR_LOGS' })).ok, true);
+logs = (await call({ type: 'GET_LOGS' })).logs;
+assert.deepEqual(logs.map((l) => l.event), ['logs.cleared']);
+
+console.warn = realWarn;
 console.log('✔ test_background: todo correcto');
 process.exit(0); // el keepalive del service worker mantiene vivo el proceso

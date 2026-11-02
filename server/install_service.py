@@ -63,6 +63,29 @@ def windows_startup_file() -> Path:
     return Path(os.environ["APPDATA"]) / "Microsoft/Windows/Start Menu/Programs/Startup" / f"{NAME}.vbs"
 
 
+def stop_windows_bridges(dry: bool) -> None:
+    """Detiene los puentes en marcha (python/pythonw con mcp_ws_bridge.py en la línea de comandos).
+
+    `taskkill` por título de ventana no encuentra pythonw (no tiene ventana): se usa PowerShell + CIM.
+    El script va en -EncodedCommand para que ninguna comilla se pierda por el camino.
+    """
+    import base64
+    script = (
+        "Get-CimInstance Win32_Process -Filter \"Name LIKE 'python%'\" | "
+        "Where-Object { $_.CommandLine -like '*mcp_ws_bridge.py*' } | "
+        "ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue; $_.ProcessId }"
+    )
+    print("• Deteniendo puentes anteriores (si los hay)")
+    if dry:
+        return
+    encoded = base64.b64encode(script.encode("utf-16-le")).decode("ascii")
+    res = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-EncodedCommand", encoded],
+                         capture_output=True, text=True)
+    stopped = [line for line in res.stdout.split() if line.strip().isdigit()]
+    if stopped:
+        print(f"  Detenidos: {', '.join(stopped)}")
+
+
 def install_windows(dry: bool) -> None:
     cmd = " ".join(f'""{part}""' for part in bridge_command(windowless=True))
     script = f'CreateObject("Wscript.Shell").Run "{cmd}", 0, False\n'
@@ -71,6 +94,7 @@ def install_windows(dry: bool) -> None:
     if dry:
         return
     target.write_text(script, encoding="utf-8")
+    stop_windows_bridges(dry)  # si no, el puente nuevo choca con los puertos del anterior
     subprocess.Popen(bridge_command(windowless=True), creationflags=0x00000008 | 0x00000200, close_fds=True)  # DETACHED | NEW_GROUP
 
 
@@ -79,7 +103,7 @@ def uninstall_windows(dry: bool) -> None:
     print(f"• Eliminando {target}")
     if not dry:
         target.unlink(missing_ok=True)
-        subprocess.run(["taskkill", "/F", "/FI", "WINDOWTITLE eq mcp_ws_bridge*"], capture_output=True)
+    stop_windows_bridges(dry)
 
 
 # ───────────────────────── macOS ─────────────────────────
