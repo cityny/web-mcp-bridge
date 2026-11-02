@@ -211,7 +211,8 @@
         widget.log('ok', `Ejecutando ${srv.slug} › ${call.name}…`);
         let response;
         try {
-          response = await guarded(send({ type: 'CALL_TOOL', server: srv.slug, name: call.name, arguments: call.arguments }), TOOL_TIMEOUT_MS, 'La herramienta tardó demasiado en responder.');
+          const limit = (Math.min(1800, Math.max(10, Number(state.settings.toolTimeoutSec) || 300)) + 30) * 1000; // + margen sobre el del service worker
+          response = await guarded(send({ type: 'CALL_TOOL', server: srv.slug, name: call.name, arguments: call.arguments }), Math.max(TOOL_TIMEOUT_MS, limit), 'La herramienta tardó demasiado en responder.');
         } catch (err) {
           response = { ok: false, error: err.message };
         }

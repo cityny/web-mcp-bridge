@@ -239,7 +239,16 @@ async function callToolInner({ server, name, arguments: args }) {
 
   const started = Date.now();
   try {
-    const result = await conn.callTool(name, args, CALL_TIMEOUT_MS);
+    const timeoutSec = Math.min(1800, Math.max(10, Number(settings.toolTimeoutSec) || CALL_TIMEOUT_MS / 1000));
+    let result;
+    try {
+      result = await conn.callTool(name, args, timeoutSec * 1000);
+    } catch (err) {
+      if (/Tiempo de espera agotado/.test(err.message)) {
+        throw new Error(`La herramienta superó el tiempo máximo (${timeoutSec} s). Es posible que el programa (p. ej. AutoCAD) siga ocupado con esa operación: espera, comprueba el estado con una consulta sencilla y no repitas la misma orden. El límite se cambia en Ajustes.`);
+      }
+      throw err;
+    }
     const ms = Date.now() - started;
     log(result?.isError ? 'warn' : 'info', 'tool.call', { server: label, tool: name, status: result?.isError ? 'error' : 'ok', ms, args: entry.args });
     await addHistory({ ...entry, status: result?.isError ? 'error' : 'ok', ms });
@@ -458,6 +467,7 @@ const mutations = {
       added.push(name);
     }
     if (added.length || changed) await saveServers(servers);
+    if (added.length) log('info', 'servers.discovered', { added }); // solo se registra cuando aparece algo nuevo
     return { ok: true, found: found.length, added, configError: listing.config_error ?? null };
   }),
 
@@ -511,7 +521,7 @@ async function handleMessage(msg, sender) {
     }
     case 'PUT_BRIDGE_CONFIG': {
       const res = await bridgeControl({ type: 'put_config', content: String(msg.content ?? '') });
-      log('info', 'bridge.config_saved', { servers: res.servers?.map((s) => `${s.name}:${s.port}`) });
+      log('info', 'bridge.config_saved', { servers: res.servers?.map((s) => `${s.name}:${s.transport === 'http' ? s.url : s.port}`) });
       return { ok: true, servers: res.servers };
     }
     case 'CHECK_UPDATE': return { ok: true, update: await checkUpdate() };
@@ -539,7 +549,7 @@ async function handleMessage(msg, sender) {
 const sourceOf = (sender) => (sender?.tab && !String(sender.url ?? '').startsWith('chrome-extension://') ? 'content' : 'popup');
 
 /** Mensajes que NO se registran (frecuentes o de solo lectura). */
-const QUIET = new Set(['CHECK_UPDATE', 'SLEEP', 'GET_STATE', 'GET_ACTIVE_TOOLS', 'GET_HISTORY', 'GET_LOGS', 'CLEAR_LOGS', 'LOG', 'CALL_TOOL', 'GET_BRIDGE_CONFIG', 'OPEN_EDITOR', 'FOCUS_TAB', 'RESTORE_FOCUS']);
+const QUIET = new Set(['DISCOVER_SERVERS', 'CHECK_UPDATE', 'SLEEP', 'GET_STATE', 'GET_ACTIVE_TOOLS', 'GET_HISTORY', 'GET_LOGS', 'CLEAR_LOGS', 'LOG', 'CALL_TOOL', 'GET_BRIDGE_CONFIG', 'OPEN_EDITOR', 'FOCUS_TAB', 'RESTORE_FOCUS']);
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   handleMessage(msg, sender)
