@@ -53,3 +53,18 @@
 - Error en el PC de Isabel: `python -c $probe` → SyntaxError. PowerShell 5.1 quita las comillas dobles de los argumentos que pasa a programas nativos, y además `2>$null` con `$ErrorActionPreference = 'Stop'` corta el script ante cualquier salida en stderr.
 - Solución: la comprobación pasa a un archivo propio, `scripts/windows/check_bridge.py`, y durante esa llamada se usa `ErrorActionPreference = 'Continue'`. Probado contra el puente real (lista los MCP) y sin puente (código 1).
 - Lección: en scripts .ps1 no pasar código con `-c` a programas nativos; usar archivos.
+
+## 2026-11-02 — Claude (asistente de desarrollo) · Punto B: registro de eventos
+- Isabel aprueba el plan: 1) pull request a `main`, B) registros, D) interfaz nueva + panel lateral, C) actualización automática.
+- `background/logger.js`: entradas `{ts, level, source, event, platform?, details?}`, anillo de 2.000 en `chrome.storage.local` (`wmb_logs`), escrituras agrupadas cada 500 ms. Los detalles se recortan (300 caracteres por texto, profundidad 3).
+- Qué se registra:
+  - arranque del service worker;
+  - conexión, caída y herramientas de cada MCP (sin repetir el mismo error en cada reintento);
+  - llamadas a herramientas (servidor, herramienta, argumentos recortados, duración y error);
+  - acciones del popup (activar, permisos, ajustes, detectar…);
+  - eventos del chat: llamada detectada, aprobación, resultado entregado, fallos y todo lo que muestra el panel flotante.
+  No se registran las consultas frecuentes (GET_STATE, SLEEP…) ni el texto de los mensajes del usuario.
+- Popup: nueva pestaña «Registro» con filtro por nivel, exportación a JSON (versión + navegador + eventos) y borrado con confirmación. Es provisional: se integrará en la interfaz nueva del punto D.
+- Error visto por Isabel (`ws://127.0.0.1:8765 … 404`): la extensión no se había recargado tras el cambio de puerto.
+- `install_service.py` en Windows detiene ahora los puentes anteriores con PowerShell `-EncodedCommand` + CIM, tanto al instalar como al desinstalar. Antes, ejecutarlo directamente arrancaba un segundo puente y `--uninstall` no paraba `pythonw`. No probado en Windows.
+- Pruebas: `test_background` (eventos, recorte, origen, borrado) y prueba con la extensión real en Chromium (pestaña Registro + exportación).

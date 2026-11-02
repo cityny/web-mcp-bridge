@@ -55,6 +55,7 @@ El popup detecta los MCP configurados en `server/servers.json` (canal de descubr
    - caché de la lista de mensajes;
    - prueba en Chromium con un DOM simulado.
 4. Instalación en Windows: `INSTALL.md` + `install.ps1`. Ya instalado y funcionando con `demo` en mi PC.
+6. Registro de eventos y errores (pestaña «Registro», exportación JSON).
 5. Descubrimiento de MCP desde el popup, recarga en caliente de `servers.json` y formatos `{nombre: {command, args, port}}` / `mcpServers`.
 
 ## Objetivos
@@ -63,7 +64,7 @@ El popup detecta los MCP configurados en `server/servers.json` (canal de descubr
 - Usar varios MCP reales en mi PC, por ejemplo uno de archivos de Windows y otro para controlar AutoCAD.
 
 ## Mejoras planificadas (en este orden)
-- **B. Registro de eventos y errores** para auditorías y depuración:
+- **B. Registro de eventos y errores** (HECHO) para auditorías y depuración:
   - eventos estructurados (fecha, nivel, origen, plataforma, evento y detalles recortados, sin el contenido completo de los mensajes);
   - guardados en el almacenamiento local de la extensión (los últimos ~2.000);
   - exportación a JSON y borrado desde el popup.

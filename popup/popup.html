@@ -22,6 +22,7 @@
   <nav class="tabs" role="tablist">
     <button role="tab" data-tab="servers" aria-selected="true">Servidores</button>
     <button role="tab" data-tab="history" aria-selected="false">Historial</button>
+    <button role="tab" data-tab="logs" aria-selected="false">Registro</button>
     <button role="tab" data-tab="settings" aria-selected="false">Ajustes</button>
   </nav>
 
@@ -75,6 +76,25 @@
       </div>
       <ul id="history-list" class="history-list"></ul>
       <p id="history-empty" class="muted" hidden>Todavía no se ha ejecutado ninguna herramienta.</p>
+    </section>
+
+    <!-- ───── Registro (auditoría) ───── -->
+    <section id="tab-logs" hidden>
+      <div class="summary">
+        <strong>Registro de eventos</strong>
+        <span class="log-actions">
+          <select id="log-level" aria-label="Filtrar por nivel">
+            <option value="all">Todo</option>
+            <option value="warn">Avisos y errores</option>
+            <option value="error">Solo errores</option>
+          </select>
+          <button id="export-logs" class="ghost" type="button">Exportar JSON</button>
+          <button id="clear-logs" class="ghost" type="button">Borrar</button>
+        </span>
+      </div>
+      <p id="log-count" class="muted"></p>
+      <ul id="log-list" class="history-list log-list"></ul>
+      <p id="log-empty" class="muted" hidden>Sin eventos todavía.</p>
     </section>
 
     <!-- ───── Ajustes ───── -->

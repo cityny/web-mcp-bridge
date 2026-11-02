@@ -193,6 +193,55 @@ async function renderHistory() {
 }
 $('#clear-history').addEventListener('click', guard(async () => { await api('CLEAR_HISTORY'); }));
 
+// ───────────────────────── Registro (auditoría) ─────────────────────────
+
+const LOG_SHOWN = 150;
+const LEVEL_RANK = { info: 0, warn: 1, error: 2 };
+const LEVEL_TEXT = { info: 'Info', warn: 'Aviso', error: 'Error' };
+
+async function renderLogs() {
+  const { logs } = await api('GET_LOGS');
+  const min = { all: 0, warn: 1, error: 2 }[$('#log-level').value] ?? 0;
+  const shown = logs.filter((l) => (LEVEL_RANK[l.level] ?? 0) >= min).slice(-LOG_SHOWN).reverse();
+  const list = $('#log-list');
+  list.replaceChildren();
+  $('#log-empty').hidden = shown.length > 0;
+  $('#log-count').textContent = logs.length ? `${logs.length} eventos guardados · se muestran los últimos ${Math.min(shown.length, LOG_SHOWN)}` : '';
+  for (const l of shown) {
+    const li = document.createElement('li');
+    const row = document.createElement('div');
+    row.className = 'row';
+    const title = document.createElement('span');
+    title.textContent = `${l.event}${l.platform ? ` · ${l.platform}` : ''}`;
+    const level = document.createElement('span');
+    level.className = l.level === 'info' ? 'ok' : 'error';
+    level.textContent = LEVEL_TEXT[l.level] ?? l.level;
+    row.append(title, level);
+    const detail = document.createElement('small');
+    const when = new Date(l.ts).toLocaleTimeString('es');
+    detail.textContent = `${when} · ${l.source}${l.details ? ` · ${JSON.stringify(l.details)}` : ''}`;
+    li.append(row, detail);
+    list.append(li);
+  }
+}
+
+$('#log-level').addEventListener('change', () => renderLogs().catch((err) => toast(err.message)));
+$('#clear-logs').addEventListener('click', guard(async () => {
+  if (confirm('¿Borrar todo el registro de eventos?')) await api('CLEAR_LOGS');
+}));
+$('#export-logs').addEventListener('click', guard(async () => {
+  const { logs } = await api('GET_LOGS');
+  const manifest = chrome.runtime.getManifest();
+  const payload = { exportedAt: new Date().toISOString(), version: manifest.version, userAgent: navigator.userAgent, logs };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `web-mcp-bridge-registro-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.json`;
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  toast(`Exportados ${logs.length} eventos.`);
+}));
+
 // ───────────────────────── Ajustes ─────────────────────────
 
 function renderSettings(settings) {
@@ -264,6 +313,7 @@ async function refresh(force = false) {
     renderGlobalPermission(state.servers);
     renderSettings(state.settings);
     if (currentTab === 'history') await renderHistory();
+    if (currentTab === 'logs' && (force || !document.activeElement?.matches('select'))) await renderLogs();
   } catch (err) { toast(err.message); }
 }
 

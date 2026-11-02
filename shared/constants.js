@@ -13,7 +13,11 @@ export const STORAGE_KEYS = {
   servers: 'wmb_servers',
   settings: 'wmb_settings',
   history: 'wmb_history',
+  logs: 'wmb_logs',
 };
+
+/** Máximo de entradas del registro de eventos (las más antiguas se descartan). */
+export const LOG_LIMIT = 2000;
 
 /** Permisos por MCP: allow = nunca pregunta · ask = pregunta en cada llamada · deny = bloqueado. */
 export const PERMISSIONS = ['allow', 'ask', 'deny'];

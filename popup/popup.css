@@ -135,3 +135,5 @@ select[data-perm="deny"] { border-color: var(--err); }
 
 .discover { display: flex; flex-direction: column; gap: 4px; margin: 12px 0; }
 .discover button { width: 100%; }
+.log-actions { display: flex; gap: 6px; align-items: center; }
+.log-list small { word-break: break-word; }
