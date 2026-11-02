@@ -66,7 +66,7 @@ Herramientas del demo: `hora_actual`, `sumar(a, b)`, `eco(texto)`.
 1. Popup → **Añadir o editar MCP…** Se abre el editor en una pestaña.
 2. Elige una plantilla y rellena los campos:
    - **Archivos de una carpeta:** nombre y carpeta. Necesita Node.js.
-   - **MCP por HTTP:** nombre y dirección, p. ej. `http://127.0.0.1:8765/mcp`. Necesita `pip install mcp-proxy` y que el MCP HTTP esté arrancado.
+   - **MCP por HTTP:** nombre y dirección, p. ej. `http://127.0.0.1:8765/mcp`. La extensión se conecta **directamente**, sin `mcp-proxy` ni puente. El MCP HTTP tiene que estar arrancado (tu acceso directo).
    - **Personalizado:** comando y argumentos.
 3. Pulsa **Añadir a la configuración**, revisa la tabla «Lo que se ejecutará» y pulsa **Guardar** (o Ctrl+S). Te pedirá confirmación con los comandos nuevos.
 4. El puente aplica el cambio al momento y el MCP aparece en el popup, desactivado. Actívalo con su interruptor.
@@ -77,6 +77,7 @@ Más detalles:
   - Si pegas rutas de Windows con `\`, el botón **Cambiar \ por /** las arregla.
   - Cada vez que guardas, se deja una copia del archivo anterior en `servers.json.bak`.
 - **Seguridad:** solo esta extensión (ID fijo `kpjokcdpjbiljllmdobofmomhifebbbo`) puede leer o cambiar la configuración. Otras extensiones y las webs no pueden.
+- **MCP por HTTP:** se escriben como `{"autocad": {"url": "http://127.0.0.1:8765/mcp"}}`. El puente no arranca nada para ellos, solo los anuncia a la extensión.
 - **Formatos admitidos:** `{"nombre": {"command", "args", "port"}}`, `{"mcpServers": {...}}` (estilo Claude Desktop) y `{"servers": [...]}`. Sin `port` se asigna uno libre desde 8800.
 
 ## Actualización automática

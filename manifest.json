@@ -21,7 +21,8 @@
   "permissions": [
     "storage",
     "alarms",
-    "sidePanel"
+    "sidePanel",
+    "declarativeNetRequest"
   ],
   "host_permissions": [
     "https://chatgpt.com/*",
@@ -29,7 +30,9 @@
     "https://claude.ai/*",
     "https://chat.deepseek.com/*",
     "ws://localhost/*",
-    "ws://127.0.0.1/*"
+    "ws://127.0.0.1/*",
+    "http://localhost/*",
+    "http://127.0.0.1/*"
   ],
   "background": {
     "service_worker": "background/background.js",

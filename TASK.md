@@ -6,7 +6,8 @@
 - [ ] Fusionar el PR #2 y cambiar la carpeta de Isabel a `main` (`git checkout main`) para que funcione la actualización automática
 - [ ] Probar en Windows: tarea programada `WebMCPBridge-Update` y recarga automática de la extensión
 - [ ] Probar AutoCAD desde DeepSeek (Isabel)
-- [ ] Soporte HTTP nativo (Streamable HTTP) en la extensión: MCP con `"url"` en servers.json sin mcp-proxy (ya no bloquea: mcp-proxy funciona)
+- [ ] Cambiar `autocad` a HTTP directo en el PC de Isabel (editor → `{"url": "http://127.0.0.1:8765/mcp"}`) y probar
+- [ ] Ampliar herramientas del MCP de AutoCAD (¿repo `cityny/rive-llm`? pendiente de confirmar)
 - [ ] Cargar la extensión en Chrome y probar con `demo` en chat.deepseek.com (Isabel)
 - [ ] Punto D (resto) — Añadir/editar/quitar MCP desde el popup (escritura de servers.json vía puente, con clave y confirmación)
 - [ ] Llevar los cambios de la rama de desarrollo a `main`
@@ -27,3 +28,4 @@
 - [x] AutoCAD (MCP HTTP) conectado vía mcp-proxy: 16 herramientas (2026-11-02)
 - [x] Punto D — Interfaz nueva (MCP / Actividad / Ajustes) y panel lateral (2026-11-02)
 - [x] Punto C — Actualización automática: `update.ps1` + tarea programada + recarga de la extensión por `update-stamp.json` (2026-11-02)
+- [x] Soporte HTTP nativo (Streamable HTTP) en la extensión, sin mcp-proxy (2026-11-02)

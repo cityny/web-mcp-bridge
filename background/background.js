@@ -7,6 +7,7 @@
  *   3. Exponer a popup y content scripts una API de mensajes (ver `handleMessage`).
  */
 import { McpConnection } from './ws_client.js';
+import { HttpMcpConnection } from './http_client.js';
 import { log, getLogs, clearLogs, flushLogs } from './logger.js';
 import {
   STORAGE_KEYS as KEYS, DEFAULT_SETTINGS, MAX_ACTIVE_SERVERS,
@@ -138,7 +139,8 @@ async function reconcile() {
     if (existing) {
       existing.server = server;
     } else {
-      const conn = new McpConnection(server, (evt) => onConnectionChange(evt, conn), () => gateFor(conn.server));
+      const Connection = isHttp(server.url) ? HttpMcpConnection : McpConnection;
+      const conn = new Connection(server, (evt) => onConnectionChange(evt, conn), () => gateFor(conn.server));
       connections.set(id, conn);
       conn.connect();
     }
@@ -280,7 +282,7 @@ function bridgeControl(request = null, { url = DISCOVERY_URL, timeout = DISCOVER
 }
 
 /** Último estado conocido del puente local (lo muestra la interfaz). */
-const bridgeStatus = { ok: null, at: 0, count: 0, error: null, configError: null, ports: [] };
+const bridgeStatus = { ok: null, at: 0, count: 0, error: null, configError: null, ports: [], keys: [] };
 
 async function fetchDiscovery() {
   const wasOk = bridgeStatus.ok;
@@ -289,6 +291,7 @@ async function fetchDiscovery() {
     Object.assign(bridgeStatus, {
       ok: true, at: Date.now(), count: listing.servers.length, error: null, configError: listing.config_error ?? null,
       ports: listing.servers.map((s) => Number(s.port)),
+      keys: listing.servers.map(itemKey).filter(Boolean),
     });
     // Los MCP que estaban en espera (puente caído o MCP que faltaba) se conectan ya, sin esperar al reintento.
     for (const conn of connections.values()) if (conn.status !== 'connected' && !gateFor(conn.server)) conn.connect();
@@ -308,10 +311,11 @@ async function fetchDiscovery() {
  */
 function gateFor(server) {
   if (!server?.managed) return null;
-  if (bridgeStatus.ok === false) return 'El puente local no responde. Se conectará solo cuando vuelva.';
-  const port = localPort(server.url);
-  if (bridgeStatus.ok === true && port && !bridgeStatus.ports.includes(port)) {
-    return `No está en la configuración del puente (puerto ${port}). Añádelo en «Añadir o editar MCP» o quítalo de la lista.`;
+  const http = isHttp(server.url);
+  // Un MCP HTTP no depende del puente: solo se frena si el puente responde y ya no lo tiene configurado.
+  if (bridgeStatus.ok === false && !http) return 'El puente local no responde. Se conectará solo cuando vuelva.';
+  if (bridgeStatus.ok === true && !bridgeStatus.keys.includes(serverKey(server.url))) {
+    return `No está en la configuración del puente (${http ? server.url : `puerto ${localPort(server.url)}`}). Añádelo en «Añadir o editar MCP» o quítalo de la lista.`;
   }
   return null;
 }
@@ -329,8 +333,24 @@ function localPort(raw) {
 function validateUrl(raw) {
   let url;
   try { url = new URL(raw); } catch { throw new Error('La dirección no es válida.'); }
-  if (!['ws:', 'wss:'].includes(url.protocol)) throw new Error('La dirección debe empezar por ws:// o wss://');
+  if (!['ws:', 'wss:', 'http:', 'https:'].includes(url.protocol)) throw new Error('La dirección debe empezar por ws://, wss://, http:// o https://');
   return url.toString().replace(/\/$/, '');
+}
+
+const isHttp = (url) => /^https?:\/\//i.test(String(url ?? ''));
+
+/** Clave para comparar MCP: «ws:<puerto>» para los locales del puente, la URL normalizada para los HTTP. */
+function serverKey(url) {
+  if (isHttp(url)) { try { return new URL(url).toString().replace(/\/$/, ''); } catch { return null; } }
+  const port = localPort(url);
+  return port ? `ws:${port}` : url;
+}
+
+/** Clave de una entrada del listado del puente. */
+function itemKey(item) {
+  if (item?.transport === 'http' || isHttp(item?.url)) return serverKey(item.url);
+  const port = Number(item?.port);
+  return Number.isInteger(port) && port > 0 ? `ws:${port}` : null;
 }
 
 /** Ajustes y cambios de configuración que se registran (sin datos sensibles). */
@@ -410,23 +430,34 @@ const mutations = {
    */
   DISCOVER_SERVERS: () => mutate(async (servers, settings) => {
     const listing = await fetchDiscovery();
-    const found = listing.servers;
-    const known = new Set(servers.map((s) => localPort(s.url)).filter(Boolean));
-    const ports = new Set(found.map((item) => Number(item?.port)));
-    let marked = false;
-    for (const s of servers) { // los ya registrados que el puente gestiona también quedan marcados
-      if (!s.managed && ports.has(localPort(s.url))) { s.managed = true; marked = true; }
+    const found = listing.servers.map((item) => ({ ...item, key: itemKey(item) })).filter((item) => item.key);
+    const byKey = new Map(found.map((item) => [item.key, item]));
+    let changed = false;
+    for (const s of servers) {
+      const key = serverKey(s.url);
+      if (byKey.has(key)) { // ya registrado: se marca como gestionado por el puente
+        if (!s.managed) { s.managed = true; changed = true; }
+        continue;
+      }
+      // Mismo nombre con otra dirección (p. ej. autocad pasó de mcp-proxy en ws://localhost:8800 a HTTP directo):
+      // se actualiza la dirección conservando interruptor y permiso.
+      const renamed = s.managed && found.find((item) => item.name === s.name && !servers.some((o) => serverKey(o.url) === item.key));
+      if (renamed) {
+        log('info', 'server.moved', { server: s.name, from: s.url, to: renamed.url });
+        s.url = renamed.url;
+        changed = true;
+      }
     }
+    const known = new Set(servers.map((s) => serverKey(s.url)));
     const added = [];
     for (const item of found) {
-      const port = Number(item?.port);
-      if (!Number.isInteger(port) || port <= 0 || known.has(port)) continue;
-      const name = String(item.name ?? '').trim().slice(0, 40) || `mcp-${port}`;
-      servers.push({ id: crypto.randomUUID(), name, url: `ws://localhost:${port}`, enabled: false, permission: settings.defaultPermission, managed: true });
-      known.add(port);
+      if (known.has(item.key)) continue;
+      const name = String(item.name ?? '').trim().slice(0, 40) || 'mcp';
+      servers.push({ id: crypto.randomUUID(), name, url: item.transport === 'http' ? item.url : `ws://localhost:${item.port}`, enabled: false, permission: settings.defaultPermission, managed: true });
+      known.add(item.key);
       added.push(name);
     }
-    if (added.length || marked) await saveServers(servers);
+    if (added.length || changed) await saveServers(servers);
     return { ok: true, found: found.length, added, configError: listing.config_error ?? null };
   }),
 
@@ -598,4 +629,29 @@ fetchDiscovery().catch(() => {});
 checkUpdate().catch(() => {});
 
 log('info', 'sw.start', { version: chrome.runtime.getManifest?.().version });
+
+/**
+ * Los servidores MCP HTTP hechos con FastMCP en 127.0.0.1 rechazan (403) peticiones con `Origin: chrome-extension://…`
+ * (protección contra páginas web maliciosas). Esta regla quita el Origin SOLO en las peticiones que hace ESTA extensión
+ * a localhost, igual que haría un cliente de escritorio (mcp-proxy, Claude Desktop). Las webs siguen bloqueadas.
+ */
+async function installLocalhostRule() {
+  const dnr = chrome.declarativeNetRequest;
+  if (!dnr?.updateSessionRules) return;
+  await dnr.updateSessionRules({
+    removeRuleIds: [1],
+    addRules: [{
+      id: 1,
+      priority: 1,
+      action: { type: 'modifyHeaders', requestHeaders: [{ header: 'origin', operation: 'remove' }] },
+      condition: {
+        requestDomains: ['127.0.0.1', 'localhost'],
+        tabIds: [chrome.tabs?.TAB_ID_NONE ?? -1], // peticiones del service worker (no de páginas)
+        initiatorDomains: [chrome.runtime.id],
+        resourceTypes: ['xmlhttprequest', 'other'],
+      },
+    }],
+  });
+}
+installLocalhostRule().catch((err) => log('error', 'dnr.rule', { error: err.message }));
 reconcile().catch((err) => { console.error('[WMB] reconcile', err); log('error', 'reconcile', { error: err.message }); });

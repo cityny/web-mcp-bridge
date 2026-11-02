@@ -152,3 +152,24 @@
 - Causa: desconocida (algo restauró los archivos antiguos después de ejecutar el instalador nuevo: `update-hidden.vbs` y `update-stamp.json` existen).
 - Solución propuesta: `git restore .` (es seguro: el contenido antiguo sigue en el historial, `d768e0a`) y después `git checkout -B main origin/main`.
 - `.gitignore`: se añade `server/servers.json.bak`.
+
+## 2026-11-02 — Claude (asistente de desarrollo) · Soporte HTTP nativo (sin mcp-proxy)
+- `background/http_client.js` (`HttpMcpConnection`): Streamable HTTP con la misma interfaz que el cliente WebSocket.
+  - POST JSON-RPC con respuestas JSON o SSE, cabecera `Mcp-Session-Id` y `MCP-Protocol-Version`;
+  - 202 para las notificaciones; si el MCP se reinicia (404 de sesión), se reconecta solo;
+  - ping cada 25 s, DELETE al cerrar, reintentos de 2 a 60 s.
+- Hallazgo, verificado con FastMCP 1.30 en 127.0.0.1: el servidor responde **403** a cualquier petición con `Origin: chrome-extension://…` (protección del SDK contra webs). Solución: regla `declarativeNetRequest` de sesión que quita `Origin` solo en las peticiones de ESTA extensión (`initiatorDomains` = ID propio, sin pestaña) a `127.0.0.1`/`localhost`. Equivale a lo que hace un cliente de escritorio; las webs siguen bloqueadas.
+- Permisos nuevos: `declarativeNetRequest`; host `http://127.0.0.1/*` y `http://localhost/*`.
+- Puente:
+  - acepta `{"nombre": {"url": "http://…"}}`: no lo arranca, lo anuncia en el listado con `transport: "http"`;
+  - las entradas URL no ocupan puertos ni chocan con los automáticos.
+- Extensión:
+  - elige el cliente según la dirección (http/https o ws/wss);
+  - la detección registra los MCP HTTP;
+  - si un MCP gestionado conserva su nombre y cambia de dirección (autocad: `ws://localhost:8800` con mcp-proxy → `http://…/mcp`), se actualiza la dirección conservando interruptor y permiso;
+  - un MCP HTTP no se frena porque el puente esté caído.
+- Editor: la plantilla «MCP por HTTP» genera `{"url": …}` (conexión directa). La vista previa indica que no se ejecuta nada en el PC.
+- Pruebas:
+  - `tests/test_http.mjs`: SSE, sesión, 202, error del servidor, reinicio con 404, puerta cerrada, DELETE;
+  - `test_bridge_config`: entradas URL;
+  - Chromium con FastMCP real: migración automática de autocad a HTTP, conexión sin 403 y llamada a `zoom`.

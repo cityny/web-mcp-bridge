@@ -25,7 +25,7 @@
         <span>Tipo</span>
         <select id="tpl-type">
           <option value="folder">Archivos de una carpeta (servidor oficial)</option>
-          <option value="http">MCP por HTTP (vía mcp-proxy)</option>
+          <option value="http">MCP por HTTP (conexión directa)</option>
           <option value="custom">Personalizado (comando propio)</option>
         </select>
       </label>
@@ -41,7 +41,7 @@
       <label class="field" data-for="http" hidden>
         <span>Dirección del MCP</span>
         <input id="tpl-url" type="text" placeholder="http://127.0.0.1:8765/mcp" spellcheck="false">
-        <small class="muted">Necesita <code>pip install mcp-proxy</code>. El MCP HTTP debe estar arrancado aparte.</small>
+        <small class="muted">La extensión se conecta directamente, sin instalar nada más. El MCP debe estar arrancado aparte (p. ej. tu acceso directo).</small>
       </label>
       <label class="field" data-for="custom" hidden>
         <span>Comando</span>
