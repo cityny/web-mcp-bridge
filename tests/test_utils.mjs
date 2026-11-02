@@ -87,6 +87,11 @@ for (const piece of ['hola', '.png', '.wav', '[recurso file:///a.txt]\ncontenido
 plan = WMB.planResult({ content: [{ type: 'text', text: '{"a":1}' }], structuredContent: { a: 1 } }, { server: 's', name: 't', status: 'ok' });
 assert.equal(plan.build(true).split('"a"').length - 1, 1);
 
+// structuredContent de FastMCP ({"result": "<mismo texto>"}) tampoco se repite
+const estado = '{"version": "25.0s", "capas": 16}';
+plan = WMB.planResult({ content: [{ type: 'text', text: estado }], structuredContent: { result: estado } }, { server: 'autocad', name: 'estado', status: 'ok' });
+assert.equal(plan.build(true).split('"capas"').length - 1, 1, 'el resultado de AutoCAD no debe llegar duplicado');
+
 // 11) Textos largos: NO se recortan; se adjuntan completos como archivo (o van enteros en línea si falla el adjunto)
 const long = 'x'.repeat(5000);
 plan = WMB.planResult({ content: [{ type: 'text', text: long }] }, { server: 's', name: 't', status: 'ok', maxChars: 1000 });

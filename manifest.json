@@ -20,7 +20,8 @@
   },
   "permissions": [
     "storage",
-    "alarms"
+    "alarms",
+    "sidePanel"
   ],
   "host_permissions": [
     "https://chatgpt.com/*",
@@ -91,5 +92,8 @@
       ],
       "run_at": "document_idle"
     }
-  ]
+  ],
+  "side_panel": {
+    "default_path": "popup/popup.html"
+  }
 }

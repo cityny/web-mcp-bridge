@@ -94,18 +94,33 @@ function logConnection(conn, evt) {
 
 function onConnectionChange(evt, conn) {
   if (conn) logConnection(conn, evt);
+  if (evt.next === 'connected' || evt.prev === 'connected') {
+    loadState().then(({ settings }) => updateBadge(settings.bridgeEnabled)).catch(() => {});
+  }
   if (evt.kind === 'tools' || evt.prev === 'connected' || evt.next === 'connected') scheduleBroadcast();
 }
 
 /** Alinea las conexiones abiertas con los servidores habilitados en storage. */
+/** Icono: «OFF» con el bridge apagado; si no, nº de MCP conectados (vacío si ninguno). */
 async function updateBadge(enabled) {
-  await chrome.action.setBadgeText({ text: enabled ? '' : 'OFF' });
-  await chrome.action.setBadgeBackgroundColor({ color: '#6b7280' });
+  const connected = [...connections.values()].filter((c) => c.status === 'connected').length;
+  await chrome.action.setBadgeText({ text: enabled ? (connected ? String(connected) : '') : 'OFF' });
+  await chrome.action.setBadgeBackgroundColor({ color: enabled ? '#0f766e' : '#6b7280' });
+}
+
+/** Panel lateral: si el usuario lo prefiere, el icono abre el panel en vez del popup. */
+let appliedPanelPref = null;
+async function applyActionBehavior(preferSidePanel) {
+  if (appliedPanelPref === preferSidePanel) return;
+  appliedPanelPref = preferSidePanel;
+  await chrome.action.setPopup?.({ popup: preferSidePanel ? '' : 'popup/popup.html' });
+  await chrome.sidePanel?.setPanelBehavior?.({ openPanelOnActionClick: Boolean(preferSidePanel) });
 }
 
 async function reconcile() {
   const { servers, settings } = await loadState();
   updateBadge(settings.bridgeEnabled).catch(() => {});
+  applyActionBehavior(Boolean(settings.preferSidePanel)).catch(() => {});
   // Con el bridge apagado no se mantiene ninguna conexión.
   const wanted = new Map((settings.bridgeEnabled ? servers : []).filter(isUsable).slice(0, MAX_ACTIVE_SERVERS).map((s) => [s.id, s]));
 
@@ -138,6 +153,7 @@ async function getSnapshot() {
   return {
     ok: true,
     settings,
+    bridge: bridgeStatus,
     max: MAX_ACTIVE_SERVERS,
     servers: servers.map((s) => {
       const conn = connections.get(s.id);
@@ -147,6 +163,7 @@ async function getSnapshot() {
         status: conn?.status ?? 'disconnected',
         error: conn?.lastError ?? null,
         toolCount: conn?.tools.length ?? 0,
+        tools: (conn?.tools ?? []).map((t) => ({ name: t.name, description: String(t.description ?? '').replace(/\s+/g, ' ').slice(0, 180) })),
         approxTokens: conn ? Math.ceil(JSON.stringify(conn.tools).length / 4) : 0,
       };
     }),
@@ -253,7 +270,19 @@ function bridgeControl(request = null, { url = DISCOVERY_URL, timeout = DISCOVER
   });
 }
 
-const fetchDiscovery = () => bridgeControl();
+/** Último estado conocido del puente local (lo muestra la interfaz). */
+const bridgeStatus = { ok: null, at: 0, count: 0, error: null, configError: null };
+
+async function fetchDiscovery() {
+  try {
+    const listing = await bridgeControl();
+    Object.assign(bridgeStatus, { ok: true, at: Date.now(), count: listing.servers.length, error: null, configError: listing.config_error ?? null });
+    return listing;
+  } catch (err) {
+    Object.assign(bridgeStatus, { ok: false, at: Date.now(), error: err.message });
+    throw err;
+  }
+}
 
 /** Puerto de una dirección ws:// local, o null si no es local. */
 function localPort(raw) {
@@ -288,6 +317,9 @@ const mutate = (fn) => withLock(async () => {
   return result ?? { ok: true };
 });
 
+/** Nombres de los MCP quitados (para el registro, que se escribe después de borrarlos). */
+const removedNames = new Map();
+
 const mutations = {
   ADD_SERVER: ({ name, url }) => mutate(async (servers, settings) => {
     const cleanUrl = validateUrl(String(url ?? '').trim());
@@ -318,6 +350,8 @@ const mutations = {
   }),
 
   REMOVE_SERVER: ({ id }) => mutate(async (servers) => {
+    const gone = servers.find((s) => s.id === id);
+    if (gone) removedNames.set(id, gone.name);
     await saveServers(servers.filter((s) => s.id !== id));
   }),
 
@@ -443,7 +477,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     .then((res) => {
       if (!QUIET.has(msg?.type)) {
         const level = res?.ok === false ? 'warn' : 'info';
-        log(level, `action.${String(msg?.type).toLowerCase()}`, { ...describeMutation(msg), ...(res?.ok === false ? { error: res.error } : {}) }, { source: sourceOf(sender) });
+        const details = { ...describeMutation(msg), ...(res?.ok === false ? { error: res.error } : {}) };
+        const write = () => log(level, `action.${String(msg?.type).toLowerCase()}`, details, { source: sourceOf(sender) });
+        if (msg?.id) { // nombre legible del MCP en vez de solo su ID
+          (msg.type === 'REMOVE_SERVER' ? Promise.resolve(removedNames.get(msg.id)) : loadState().then(({ servers }) => servers.find((s) => s.id === msg.id)?.name))
+            .then((name) => { if (name) details.server = name; }).catch(() => {}).finally(write);
+        } else write();
       }
       sendResponse(res);
     })

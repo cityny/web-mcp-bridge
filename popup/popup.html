@@ -7,107 +7,146 @@
   <link rel="stylesheet" href="popup.css">
 </head>
 <body>
-  <header>
-    <img src="../icons/icon48.png" alt="" width="32" height="32">
+  <!-- Iconos (trazo 1.75, 24×24) -->
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+      <symbol id="i-panel" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="2.5"/><path d="M14.5 4.5v15"/></symbol>
+      <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M19.5 12a7.5 7.5 0 1 1-2.2-5.3"/><path d="M19.5 4.5v4h-4"/></symbol>
+      <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4.5 19.5h4l10-10a2.1 2.1 0 0 0-3-3l-10 10z"/><path d="M13.5 8.5l3 3"/></symbol>
+      <symbol id="i-trash" viewBox="0 0 24 24"><path d="M5 7h14"/><path d="M9.5 7V5.5h5V7"/><path d="M7 7l.8 11.5h8.4L17 7"/></symbol>
+      <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+      <symbol id="i-chevron" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
+      <symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4.5v10"/><path d="M8 11l4 4 4-4"/><path d="M5 19.5h14"/></symbol>
+      <symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 4.5l8.5 15h-17z"/><path d="M12 10v4"/><path d="M12 16.8v.2"/></symbol>
+      <symbol id="i-tool" viewBox="0 0 24 24"><path d="M14.5 6.5a4 4 0 0 0 5 5l-8 8a2.1 2.1 0 0 1-3-3l8-8a4 4 0 0 1-2-2z"/></symbol>
+    </defs>
+  </svg>
+
+  <header class="top">
+    <img src="../icons/icon48.png" alt="" width="28" height="28">
     <div class="grow">
       <h1>Web MCP Bridge</h1>
-      <p id="master-label">Bridge activado</p>
+      <p id="master-label" class="sub">Bridge activado</p>
     </div>
+    <button id="open-panel" type="button" class="icon-btn" title="Abrir como panel lateral" aria-label="Abrir como panel lateral">
+      <svg class="icon"><use href="#i-panel"/></svg>
+    </button>
     <label class="switch big" title="Activar o desactivar el bridge">
       <input type="checkbox" id="master" aria-label="Activar bridge">
       <span></span>
     </label>
   </header>
 
-  <nav class="tabs" role="tablist">
-    <button role="tab" data-tab="servers" aria-selected="true">Servidores</button>
-    <button role="tab" data-tab="history" aria-selected="false">Historial</button>
-    <button role="tab" data-tab="logs" aria-selected="false">Registro</button>
-    <button role="tab" data-tab="settings" aria-selected="false">Ajustes</button>
+  <nav class="tabs" role="tablist" aria-label="Secciones">
+    <button role="tab" id="tab-btn-mcp" data-tab="mcp" aria-selected="true" aria-controls="tab-mcp">MCP</button>
+    <button role="tab" id="tab-btn-activity" data-tab="activity" aria-selected="false" aria-controls="tab-activity">Actividad</button>
+    <button role="tab" id="tab-btn-settings" data-tab="settings" aria-selected="false" aria-controls="tab-settings">Ajustes</button>
   </nav>
 
   <main id="main">
-    <!-- ───── Servidores ───── -->
-    <section id="tab-servers">
-      <div class="summary">
-        <strong id="counter">0/5 activos</strong>
-        <span id="tokens" class="muted"></span>
-      </div>
-      <p id="warning" class="warning" hidden></p>
-      <p id="config-error" class="warning" hidden></p>
-      <p id="offline-hint" class="warning" hidden>No se detecta el puente local. Ejecútalo una sola vez: <code>python server/install_service.py</code> (después arranca solo con tu equipo).</p>
-
-      <div class="perm-all">
-        <div>
-          <strong>Permiso de todos los MCP</strong>
-          <small id="perm-hint">Con «Permitir siempre» no se pregunta nada.</small>
+    <!-- ───────── MCP ───────── -->
+    <section id="tab-mcp" role="tabpanel" aria-labelledby="tab-btn-mcp">
+      <div class="bridge-status" id="bridge-status">
+        <i class="dot" id="bridge-dot"></i>
+        <div class="grow">
+          <strong id="bridge-title">Comprobando el puente local…</strong>
+          <small id="bridge-detail" class="muted"></small>
         </div>
-        <select id="perm-all" aria-label="Permiso de todos los MCP">
-          <option value="allow">Permitir siempre</option>
-          <option value="ask">Preguntar siempre</option>
-          <option value="deny">No permitir</option>
-          <option value="mixed" disabled hidden>Mixto</option>
-        </select>
+      </div>
+      <div class="toolbar">
+        <button id="discover" type="button" class="ghost"><svg class="icon"><use href="#i-refresh"/></svg>Detectar</button>
+        <button id="open-editor" type="button" class="primary"><svg class="icon"><use href="#i-plus"/></svg>Añadir o editar MCP</button>
+      </div>
+
+      <p id="config-error" class="notice error" hidden></p>
+      <p id="warning" class="notice" hidden></p>
+
+      <div class="summary" id="summary">
+        <span><strong id="counter">0 de 5 activos</strong> <span id="tokens" class="muted"></span></span>
+        <label class="perm-all">
+          <span class="muted">Permiso de todos</span>
+          <select id="perm-all" aria-label="Permiso de todos los MCP">
+            <option value="allow">Permitir siempre</option>
+            <option value="ask">Preguntar siempre</option>
+            <option value="deny">No permitir</option>
+            <option value="mixed" disabled hidden>Mixto</option>
+          </select>
+        </label>
       </div>
 
       <ul id="server-list" class="server-list"></ul>
-      <div id="empty" class="muted" hidden>
-        <p>La extensión no trae ningún MCP: añade los tuyos abajo (por ejemplo <code>ws://localhost:8080</code>).</p>
-        <button id="add-demo" type="button" class="ghost">Añadir servidor de prueba (demo, ws://localhost:8090)</button>
+
+      <div id="empty" class="empty" hidden>
+        <strong>Todavía no hay MCP</strong>
+        <ol>
+          <li>Pulsa <b>Añadir o editar MCP</b> y elige una plantilla (carpeta, HTTP o comando propio).</li>
+          <li>Guarda: el MCP aparece aquí, desactivado.</li>
+          <li>Actívalo con su interruptor y ábrelo en el chat.</li>
+        </ol>
+        <button id="add-demo" type="button" class="ghost">Probar con el servidor demo</button>
       </div>
 
-      <div class="discover">
-        <div class="discover-buttons">
-          <button id="discover" type="button" class="primary">Detectar MCP del PC</button>
-          <button id="open-editor" type="button" class="ghost">Añadir o editar MCP…</button>
+      <details class="advanced">
+        <summary><svg class="icon chev"><use href="#i-chevron"/></svg>Conectar por dirección (avanzado)</summary>
+        <form id="add-form" class="add-form" autocomplete="off">
+          <input id="add-name" type="text" placeholder="Nombre (p. ej. mi-mcp)" maxlength="40" required>
+          <input id="add-url" type="text" placeholder="ws://localhost:8080" spellcheck="false" required>
+          <button type="submit" class="ghost">Conectar</button>
+        </form>
+      </details>
+    </section>
+
+    <!-- ───────── Actividad ───────── -->
+    <section id="tab-activity" role="tabpanel" aria-labelledby="tab-btn-activity" hidden>
+      <div class="segmented" role="radiogroup" aria-label="Ver">
+        <button type="button" data-view="calls" aria-pressed="true">Llamadas</button>
+        <button type="button" data-view="logs" aria-pressed="false">Registro</button>
+      </div>
+
+      <div id="view-calls">
+        <div class="summary">
+          <strong>Últimas llamadas a herramientas</strong>
+          <button id="clear-history" class="ghost small" type="button">Borrar</button>
         </div>
-        <small class="muted">Los MCP nuevos se añaden desactivados: actívalos con su interruptor. Para crear o cambiar MCP usa «Añadir o editar MCP…».</small>
+        <ul id="history-list" class="list"></ul>
+        <p id="history-empty" class="muted empty-line" hidden>Aún no se ha ejecutado ninguna herramienta. Cuando la IA use una, aparecerá aquí con su resultado y duración.</p>
       </div>
 
-      <form id="add-form" class="add-form" autocomplete="off">
-        <h2>Añadir servidor MCP manualmente</h2>
-        <input id="add-name" type="text" placeholder="Nombre (p. ej. astrax-mcp)" maxlength="40" required>
-        <input id="add-url" type="text" placeholder="ws://localhost:8080" spellcheck="false" required>
-        <button type="submit" class="primary">Añadir servidor</button>
-      </form>
-    </section>
-
-    <!-- ───── Historial ───── -->
-    <section id="tab-history" hidden>
-      <div class="summary">
-        <strong>Últimas llamadas</strong>
-        <button id="clear-history" class="ghost" type="button">Borrar</button>
-      </div>
-      <ul id="history-list" class="history-list"></ul>
-      <p id="history-empty" class="muted" hidden>Todavía no se ha ejecutado ninguna herramienta.</p>
-    </section>
-
-    <!-- ───── Registro (auditoría) ───── -->
-    <section id="tab-logs" hidden>
-      <div class="summary">
-        <strong>Registro de eventos</strong>
-        <span class="log-actions">
+      <div id="view-logs" hidden>
+        <div class="summary">
           <select id="log-level" aria-label="Filtrar por nivel">
             <option value="all">Todo</option>
             <option value="warn">Avisos y errores</option>
             <option value="error">Solo errores</option>
           </select>
-          <button id="export-logs" class="ghost" type="button">Exportar JSON</button>
-          <button id="clear-logs" class="ghost" type="button">Borrar</button>
-        </span>
+          <span class="row-gap">
+            <button id="export-logs" class="ghost small" type="button"><svg class="icon"><use href="#i-download"/></svg>Exportar</button>
+            <button id="clear-logs" class="ghost small" type="button">Borrar</button>
+          </span>
+        </div>
+        <p id="log-count" class="muted small-text"></p>
+        <ul id="log-list" class="list"></ul>
+        <p id="log-empty" class="muted empty-line" hidden>Sin eventos. Aquí se registran conexiones, llamadas y errores para revisarlos o exportarlos.</p>
       </div>
-      <p id="log-count" class="muted"></p>
-      <ul id="log-list" class="history-list log-list"></ul>
-      <p id="log-empty" class="muted" hidden>Sin eventos todavía.</p>
     </section>
 
-    <!-- ───── Ajustes ───── -->
-    <section id="tab-settings" hidden>
+    <!-- ───────── Ajustes ───────── -->
+    <section id="tab-settings" role="tabpanel" aria-labelledby="tab-btn-settings" hidden>
+      <h2>Interfaz</h2>
+      <label class="setting">
+        <input type="checkbox" id="set-preferSidePanel">
+        <span>
+          <strong>Abrir como panel lateral</strong>
+          <small>Al pulsar el icono de la extensión se abre el panel fijo al lado de la página en lugar de esta ventana.</small>
+        </span>
+      </label>
+
+      <h2>Chat</h2>
       <label class="setting">
         <input type="checkbox" id="set-autoInject">
         <span>
           <strong>Añadir instrucciones automáticamente</strong>
-          <small>Al enviar tu primer mensaje del chat, la extensión antepone las instrucciones de las herramientas. No tienes que pulsar nada.</small>
+          <small>Al enviar tu primer mensaje, se anteponen las instrucciones de las herramientas.</small>
         </span>
       </label>
       <label class="setting">
@@ -121,30 +160,30 @@
         <input type="checkbox" id="set-reminder">
         <span>
           <strong>Recordar a la IA que tiene herramientas</strong>
-          <small>Añade una línea corta (~45 tokens) a cada mensaje, para que la IA no olvide que dispone de tus MCP locales.</small>
+          <small>Una línea corta (~45 tokens) en cada mensaje.</small>
         </span>
       </label>
       <label class="setting column">
-        <strong>Reenviar las instrucciones completas cada N mensajes</strong>
-        <small>Por si la conversación se hace larga y la IA pierde el contexto. 0 = nunca. También se reenvían solas si la IA dice que no tiene acceso.</small>
+        <strong>Reenviar las instrucciones cada N mensajes</strong>
+        <small>0 = nunca. También se reenvían solas si la IA dice que no tiene acceso.</small>
         <input type="number" id="set-reinjectEvery" min="0" max="100" step="1">
+      </label>
+      <label class="setting column">
+        <strong>Máximo de caracteres por resultado</strong>
+        <small>Lo que pase de este límite se adjunta completo como archivo.</small>
+        <input type="number" id="set-maxResultChars" min="500" max="100000" step="500">
       </label>
       <label class="setting">
         <input type="checkbox" id="set-focusFallback">
         <span>
           <strong>Despertar la pestaña si se queda pegada</strong>
-          <small>Si el chat no acepta el resultado con la pestaña oculta, la trae al frente un instante y vuelve a la anterior.</small>
+          <small>Con la pestaña oculta, la trae al frente un instante para entregar el resultado.</small>
         </span>
-      </label>
-      <label class="setting column">
-        <strong>Máximo de caracteres por resultado</strong>
-        <small>Nada se recorta: lo que pase de este límite se adjunta completo al chat como archivo y en el mensaje queda un extracto.</small>
-        <input type="number" id="set-maxResultChars" min="500" max="100000" step="500">
       </label>
     </section>
   </main>
 
   <div id="toast" role="status" aria-live="polite"></div>
-  <script type="module" src="popup.js"></script>
+  <script src="popup.js" type="module"></script>
 </body>
 </html>

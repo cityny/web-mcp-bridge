@@ -40,6 +40,8 @@ export const DEFAULT_SETTINGS = {
   reinjectEvery: 12,
   /** Si el chat no acepta el envío con la pestaña oculta, trae la pestaña al frente un instante y vuelve a la anterior. */
   focusFallback: true,
+  /** Al pulsar el icono de la extensión se abre el panel lateral en lugar de la ventana emergente. */
+  preferSidePanel: false,
 };
 
 /** El servidor de prueba incluido en el repositorio (server/examples/demo_mcp_server.py). */

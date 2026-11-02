@@ -234,7 +234,11 @@
     }
     const structured = result?.structuredContent;
     if (structured !== undefined && structured !== null) {
-      const duplicated = (result.content ?? []).some((c) => c.type === 'text' && sameJson(c.text, structured));
+      // FastMCP envuelve el texto como {"result": "<mismo texto>"}: también es un duplicado (gasta el doble de tokens).
+      const keys = structured && typeof structured === 'object' ? Object.keys(structured) : [];
+      const wrapped = keys.length === 1 && keys[0] === 'result' && typeof structured.result === 'string' ? structured.result : null;
+      const duplicated = (result.content ?? []).some((c) => c.type === 'text'
+        && (sameJson(c.text, structured) || (wrapped !== null && (c.text === wrapped || c.text?.trim() === wrapped.trim()))));
       if (!duplicated) parts.push(JSON.stringify(structured, null, 2));
     }
     return { parts, files, hasText: textParts > 0 };

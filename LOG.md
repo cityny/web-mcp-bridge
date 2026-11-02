@@ -108,3 +108,15 @@
 ## 2026-11-02 — Isabel (usuaria) / Claude · AutoCAD conectado
 - Registro de Isabel: `autocad` (vía `mcp-proxy`, puerto 8800) conectado con 16 herramientas, `autocad-files` con 14. La cadena completa funciona en su PC: puente → mcp-proxy → MCP HTTP de AutoCAD.
 - Pendiente: prueba real desde DeepSeek. Con `mcp-proxy` funcionando, el soporte HTTP nativo deja de bloquear; queda como mejora (menos piezas que instalar).
+
+## 2026-11-02 — Claude (asistente de desarrollo) · Interfaz nueva y panel lateral (punto D)
+- Guía: Impeccable (`pbakaus/impeccable`), consultada en una carpeta temporal sin añadirla al repositorio. Modo «Operate»: claridad y densidad; iconos SVG propios en lugar de emoji/Unicode; estados completos (vacío que explica, error, deshabilitado, foco); un solo tipo de letra del sistema; color de acento solo para acciones y estados; foco, selección y barras de desplazamiento con los colores de la paleta; movimiento de 150 ms y sin animaciones decorativas.
+- Una sola página (`popup/popup.html`) para la ventana emergente y el panel lateral: detecta el contexto con `chrome.extension.getViews({type: 'popup'})`.
+- Pestañas:
+  - **MCP:** estado del puente local, «Detectar» y «Añadir o editar MCP», resumen de activos y tokens, permiso global, tarjetas con interruptor, estado, error en rojo, permiso y lista desplegable de herramientas;
+  - **Actividad:** llamadas y registro;
+  - **Ajustes:** «Abrir como panel lateral» y ajustes del chat.
+- Panel lateral: permiso `sidePanel`, `side_panel.default_path`, botón en la cabecera del popup y ajuste `preferSidePanel` (`action.setPopup('')` + `setPanelBehavior`). Verificado en Chromium.
+- El icono muestra el nº de MCP conectados.
+- El registro usa el nombre del MCP además del ID.
+- Resultados MCP: `structuredContent` de FastMCP (`{"result": "<mismo texto>"}`) ya no se duplica en el chat (el resultado de `estado` de AutoCAD llegaba dos veces y gastaba el doble de tokens).
