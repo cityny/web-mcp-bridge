@@ -8,7 +8,8 @@
     "check": "node scripts/check.mjs",
     "test": "node scripts/check.mjs && node tests/test_utils.mjs && node tests/test_prompt.mjs && node tests/test_background.mjs && python tests/test_bridge.py",
     "icons": "python scripts/generate_icons.py",
-    "pack": "node scripts/pack.mjs"
+    "pack": "node scripts/pack.mjs",
+    "test:browser": "node tests/browser/test_deepseek.mjs"
   },
   "license": "MIT"
 }

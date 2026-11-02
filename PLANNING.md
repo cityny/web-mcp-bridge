@@ -44,4 +44,5 @@ Service worker (background/) ── WebSocket ──► server/mcp_ws_bridge.py 
 
 ## Comandos
 - `npm test` — validación + tests JS + test del puente Python
+- `npm run test:browser` — prueba del adaptador DeepSeek en Chromium con DOM simulado (requiere Playwright; fuera de CI)
 - `npm run pack` — genera `dist/web-mcp-bridge.zip`

@@ -11,3 +11,10 @@
 - Decisión: eliminar `findJsonObjects` y el texto «reparado» que `messageText` añadía en ChatGPT; el parser compartido ya cubre esos casos. Beneficia a DeepSeek, Claude y Gemini sin tocar sus adaptadores.
 - Tests nuevos en `tests/test_utils.mjs` (ruta Windows, escapes válidos conservados, comillas tipográficas + barras). Verificado que fallan con el parser anterior.
 - Límite conocido: si el JSON roto sigue siendo válido (p. ej. `"C:\new"` se lee como salto de línea) no se detecta. El prompt ya pide usar `/` en rutas.
+
+## 2026-11-02 — Claude (asistente de desarrollo) · Paso 3
+- Filtro de razonamiento: `.ds-think-content` se mantiene; las clases genéricas pasan de subcadena (`[class*="think"]`) a palabra completa (`think`, `thinking`, `deepthink`, `reasoning`) y solo en 6 ancestros sin llegar a `<body>`. Motivo: una clase global como `thinking-enabled` o `unthinkable` marcaba todas las respuestas como razonamiento; el adaptador anterior caía entonces al modo «sin filtrar» e incluía también el razonamiento.
+- Filtrado de contenedores anidados: de O(n²) a lineal (recorrido de ancestros con Set).
+- Caché de `getAssistantMessages()` de 150 ms (se invalida si algún elemento sale del DOM): `getMessageKey` e `isStreaming` dejan de recalcular la lista en cada llamada dentro del mismo análisis.
+- Decisión: NO cambiar la detección de fin de generación (`GROW_MS`) ni la heurística del botón enviar sin ver el DOM real; queda en TASK.md.
+- Nueva prueba `tests/browser/test_deepseek.mjs` (Playwright, DOM simulado): filtrado, línea base, llamada nueva una sola vez, repintado sin duplicar, ruta Windows. Falla con el adaptador anterior, pasa con el nuevo. Fuera de `npm test` porque CI no tiene Chromium.
