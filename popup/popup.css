@@ -134,6 +134,7 @@ select[data-perm="deny"] { border-color: var(--err); }
 #add-demo { font: inherit; font-size: 12px; padding: 5px 9px; cursor: pointer; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); }
 
 .discover { display: flex; flex-direction: column; gap: 4px; margin: 12px 0; }
+.discover-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .discover button { width: 100%; }
 .log-actions { display: flex; gap: 6px; align-items: center; }
 .log-list small { word-break: break-word; }

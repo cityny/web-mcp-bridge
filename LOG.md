@@ -68,3 +68,17 @@
 - Error visto por Isabel (`ws://127.0.0.1:8765 … 404`): la extensión no se había recargado tras el cambio de puerto.
 - `install_service.py` en Windows detiene ahora los puentes anteriores con PowerShell `-EncodedCommand` + CIM, tanto al instalar como al desinstalar. Antes, ejecutarlo directamente arrancaba un segundo puente y `--uninstall` no paraba `pythonw`. No probado en Windows.
 - Pruebas: `test_background` (eventos, recorte, origen, borrado) y prueba con la extensión real en Chromium (pestaña Registro + exportación).
+
+## 2026-11-02 — Claude (asistente de desarrollo) · Editor de MCP en la extensión
+- Petición de Isabel: no abrir `server\servers.json` a mano. Su MCP de AutoCAD es HTTP en `127.0.0.1:8765` (por eso ese puerto estaba ocupado).
+- Corrección a la recomendación de DeepSeek: `npx -y mcp-proxy` (npm) convierte de stdio a HTTP, que es al revés de lo que hace falta. El correcto es el `mcp-proxy` de Python con `--transport=streamablehttp URL` (verificado en `sparfenyuk/mcp-proxy`).
+- Puente:
+  - el canal de control acepta `get_config` y `put_config` solo de la extensión propietaria (`chrome-extension://kpjokcdpjbiljllmdobofmomhifebbbo`); el listado sigue abierto a cualquier extensión;
+  - `put_config` valida con la misma `load_config`, deja copia `.bak`, escribe de forma atómica y aplica al momento;
+  - si `servers.json` es inválido al arrancar, el puente arranca sin MCP para poder arreglarlo desde el editor.
+- Decisión de seguridad: fijar el ID de la extensión con `"key"` en `manifest.json` (la clave privada no se guarda). Así no hay claves que copiar. Coste: Chrome la trata como extensión nueva una vez (se pierden los ajustes guardados; los MCP se vuelven a detectar solos).
+- Extensión:
+  - nueva página `editor/` con plantillas (carpeta, HTTP vía mcp-proxy, personalizado), validación en vivo, vista previa de comandos (nuevo/modificado), confirmación, Ctrl+S, «Ordenar» y «Cambiar \ por /»;
+  - el popup tiene el botón «Añadir o editar MCP…»;
+  - en el registro no se guarda el contenido del archivo, solo su tamaño.
+- Pruebas: `test_bridge_config` (propietario frente a otra extensión o sin Origin, inválido sin cambios, válido + `.bak` + aplicado) y prueba con la extensión real en Chromium (plantilla HTTP → guardar → archivo y puente actualizados; ayuda de barras).

@@ -225,23 +225,35 @@ async function callTool({ server, name, arguments: args }) {
 
 // ───────────────────────── Descubrimiento de MCP del PC ─────────────────────────
 
-/** Pide al puente local la lista de MCP configurados en servers.json. */
-function fetchDiscovery(url = DISCOVERY_URL, timeout = DISCOVERY_TIMEOUT_MS) {
+/**
+ * Habla con el canal de control del puente local.
+ * Sin `request`: devuelve la lista de MCP configurados. Con `request`: la envía y devuelve la respuesta.
+ */
+function bridgeControl(request = null, { url = DISCOVERY_URL, timeout = DISCOVERY_TIMEOUT_MS } = {}) {
   return new Promise((resolve, reject) => {
     let ws;
-    const timer = setTimeout(() => { try { ws?.close(); } catch { /* noop */ } reject(new Error('El puente no respondió. ¿Está en marcha?')); }, timeout);
+    let listing = null;
+    const timer = setTimeout(() => { try { ws?.close(); } catch { /* noop */ } reject(new Error('El puente no respondió. ¿Está en marcha?')); }, request ? timeout + 10_000 : timeout);
     const done = (fn, value) => { clearTimeout(timer); try { ws.close(); } catch { /* noop */ } fn(value); };
     try { ws = new WebSocket(url); } catch (err) { clearTimeout(timer); reject(err); return; }
     ws.onmessage = (event) => {
-      try {
-        const msg = JSON.parse(event.data);
-        if (msg?.type !== 'servers' || !Array.isArray(msg.servers)) throw new Error('Respuesta inesperada del puente.');
-        done(resolve, msg.servers);
-      } catch (err) { done(reject, err); }
+      let msg;
+      try { msg = JSON.parse(event.data); } catch { done(reject, new Error('Respuesta inesperada del puente.')); return; }
+      if (!listing) {
+        if (msg?.type !== 'servers' || !Array.isArray(msg.servers)) { done(reject, new Error('Respuesta inesperada del puente.')); return; }
+        listing = msg;
+        if (!request) done(resolve, msg.servers);
+        else ws.send(JSON.stringify(request));
+        return;
+      }
+      if (msg?.ok === false) done(reject, new Error(msg.error || 'El puente rechazó la petición.'));
+      else done(resolve, msg);
     };
     ws.onerror = () => done(reject, new Error(`No se pudo contactar con el puente local (${url}).`));
   });
 }
+
+const fetchDiscovery = () => bridgeControl();
 
 /** Puerto de una dirección ws:// local, o null si no es local. */
 function localPort(raw) {
@@ -264,6 +276,7 @@ function validateUrl(raw) {
 function describeMutation(msg) {
   const { type, ...rest } = msg;
   if (type === 'UPDATE_SETTINGS') return { settings: rest.settings };
+  if (type === 'PUT_BRIDGE_CONFIG') return { bytes: String(rest.content ?? '').length }; // el contenido no se copia al registro
   return rest;
 }
 
@@ -389,6 +402,18 @@ async function handleMessage(msg, sender) {
       log(msg.level, msg.event, msg.details, { source: sourceOf(sender), platform: msg.platform });
       return { ok: true };
     case 'GET_LOGS': return { ok: true, logs: await getLogs() };
+    case 'GET_BRIDGE_CONFIG': {
+      const res = await bridgeControl({ type: 'get_config' });
+      return { ok: true, content: res.content, path: res.path };
+    }
+    case 'PUT_BRIDGE_CONFIG': {
+      const res = await bridgeControl({ type: 'put_config', content: String(msg.content ?? '') });
+      log('info', 'bridge.config_saved', { servers: res.servers?.map((s) => `${s.name}:${s.port}`) });
+      return { ok: true, servers: res.servers };
+    }
+    case 'OPEN_EDITOR':
+      await chrome.tabs.create({ url: chrome.runtime.getURL('editor/editor.html') });
+      return { ok: true };
     case 'CLEAR_LOGS':
       await clearLogs();
       log('info', 'logs.cleared');
@@ -410,7 +435,7 @@ async function handleMessage(msg, sender) {
 const sourceOf = (sender) => (sender?.tab && !String(sender.url ?? '').startsWith('chrome-extension://') ? 'content' : 'popup');
 
 /** Mensajes que NO se registran (frecuentes o de solo lectura). */
-const QUIET = new Set(['SLEEP', 'GET_STATE', 'GET_ACTIVE_TOOLS', 'GET_HISTORY', 'GET_LOGS', 'CLEAR_LOGS', 'LOG', 'CALL_TOOL', 'FOCUS_TAB', 'RESTORE_FOCUS']);
+const QUIET = new Set(['SLEEP', 'GET_STATE', 'GET_ACTIVE_TOOLS', 'GET_HISTORY', 'GET_LOGS', 'CLEAR_LOGS', 'LOG', 'CALL_TOOL', 'GET_BRIDGE_CONFIG', 'OPEN_EDITOR', 'FOCUS_TAB', 'RESTORE_FOCUS']);
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   handleMessage(msg, sender)

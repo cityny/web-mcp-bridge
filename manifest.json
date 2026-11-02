@@ -3,6 +3,7 @@
   "name": "Web MCP Bridge",
   "version": "1.2.0",
   "description": "Conecta ChatGPT, Gemini, Claude y LLMs Web con servidores MCP locales mediante WebSocket.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0B08AZbqLKh1V35IHKnbmx12N0SeNZohDgyDLgD+Y1Zxg4nbFFjI088rTTwx+P23CgJiK0bh8RzdaGpyP2KnYD2y5PvrkHFXs7/3TvBcUyz4dLSGTXKAc4P8k7NZb+YGKSTwjPbZhiQYQn4ubDVVVaNf4WOgHir3t8Q9z9mYiqCcZ6OvRUeMUMagN1Q/qYYAWLo8nl29KgjLR75s2mPfoFQEQnWF9M3kx38qEc7JxzvCKGFtHRw2X6dZiIuMFlz6/j3is++4n1KAkGXQbk40AmQ+o1HmQLqfTbAnARKjc0G9wBYGLrxbcwgatiltlRcfUN83+ZpKl+mPYNggtBFVjQIDAQAB",
   "minimum_chrome_version": "116",
   "icons": {
     "16": "icons/icon16.png",
@@ -17,7 +18,10 @@
       "48": "icons/icon48.png"
     }
   },
-  "permissions": ["storage", "alarms"],
+  "permissions": [
+    "storage",
+    "alarms"
+  ],
   "host_permissions": [
     "https://chatgpt.com/*",
     "https://gemini.google.com/*",
@@ -32,7 +36,9 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://chatgpt.com/*"],
+      "matches": [
+        "https://chatgpt.com/*"
+      ],
       "js": [
         "content_scripts/utils.js",
         "content_scripts/prompt_builder.js",
@@ -44,7 +50,9 @@
       "run_at": "document_idle"
     },
     {
-      "matches": ["https://gemini.google.com/*"],
+      "matches": [
+        "https://gemini.google.com/*"
+      ],
       "js": [
         "content_scripts/utils.js",
         "content_scripts/prompt_builder.js",
@@ -56,7 +64,9 @@
       "run_at": "document_idle"
     },
     {
-      "matches": ["https://claude.ai/*"],
+      "matches": [
+        "https://claude.ai/*"
+      ],
       "js": [
         "content_scripts/utils.js",
         "content_scripts/prompt_builder.js",
@@ -68,7 +78,9 @@
       "run_at": "document_idle"
     },
     {
-      "matches": ["https://chat.deepseek.com/*"],
+      "matches": [
+        "https://chat.deepseek.com/*"
+      ],
       "js": [
         "content_scripts/utils.js",
         "content_scripts/prompt_builder.js",

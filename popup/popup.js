@@ -167,6 +167,7 @@ async function discover(quiet = false) {
   await refresh(true);
 }
 $('#discover').addEventListener('click', () => discover(false));
+$('#open-editor').addEventListener('click', guard(async () => { await api('OPEN_EDITOR'); window.close(); }));
 
 // ───────────────────────── Historial ─────────────────────────
 

@@ -61,25 +61,23 @@ El script:
 
 Herramientas del demo: `hora_actual`, `sumar(a, b)`, `eco(texto)`.
 
-## Añadir tus propios MCP
+## Añadir tus propios MCP (sin abrir archivos)
 
-1. Edita `server\servers.json` con el Bloc de notas y guarda. **El puente lo recarga solo** (no hace falta reiniciar ni volver a ejecutar el script).
-2. Abre el popup: el MCP nuevo aparece desactivado. Actívalo con su interruptor.
+1. Popup → **Añadir o editar MCP…** Se abre el editor en una pestaña.
+2. Elige una plantilla y rellena los campos:
+   - **Archivos de una carpeta:** nombre y carpeta. Necesita Node.js.
+   - **MCP por HTTP:** nombre y dirección, p. ej. `http://127.0.0.1:8765/mcp`. Necesita `pip install mcp-proxy` y que el MCP HTTP esté arrancado.
+   - **Personalizado:** comando y argumentos.
+3. Pulsa **Añadir a la configuración**, revisa la tabla «Lo que se ejecutará» y pulsa **Guardar** (o Ctrl+S). Te pedirá confirmación con los comandos nuevos.
+4. El puente aplica el cambio al momento y el MCP aparece en el popup, desactivado. Actívalo con su interruptor.
 
-Formatos admitidos (puedes usar cualquiera):
-
-```json
-{
-  "demo":          { "command": "python", "args": ["server/examples/demo_mcp_server.py"], "port": 8090 },
-  "autocad-files": { "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "C:/Users/Dionny Logistic/autocad-mcp"], "port": 8792 }
-}
-```
-
-- También vale `{"mcpServers": {...}}` (estilo Claude Desktop) y el formato original `{"servers": [...]}`.
-- Si no pones `port`, se asigna uno libre a partir de 8800.
-- Cada MCP necesita un puerto distinto.
-- Si guardas un JSON con errores, el puente sigue con la configuración anterior y lo anota en `server\bridge.log`.
-- No ejecutes tú el MCP en la terminal (`npx ...`): lo arranca el puente cuando lo activas en la extensión.
+Más detalles:
+- **Edición directa:** en el mismo editor puedes cambiar el JSON a mano.
+  - Valida mientras escribes.
+  - Si pegas rutas de Windows con `\`, el botón **Cambiar \ por /** las arregla.
+  - Cada vez que guardas, se deja una copia del archivo anterior en `servers.json.bak`.
+- **Seguridad:** solo esta extensión (ID fijo `kpjokcdpjbiljllmdobofmomhifebbbo`) puede leer o cambiar la configuración. Otras extensiones y las webs no pueden.
+- **Formatos admitidos:** `{"nombre": {"command", "args", "port"}}`, `{"mcpServers": {...}}` (estilo Claude Desktop) y `{"servers": [...]}`. Sin `port` se asigna uno libre desde 8800.
 
 ## Problemas frecuentes
 
@@ -88,6 +86,7 @@ Formatos admitidos (puedes usar cualquiera):
 | El servidor sale en rojo en el popup | `Get-Content server\bridge.log -Tail 20 -Encoding UTF8`; vuelve a ejecutar el script de instalación |
 | «La extensión se actualizó: recarga la pestaña» | Recarga la pestaña del chat (F5) |
 | La IA no usa la herramienta | Botón **Inyectar instrucciones** en el panel del chat |
+| El editor dice «no autorizado» | La extensión cargada no es la de este repositorio (ID distinto): quítala y vuelve a cargarla desde la carpeta del repositorio |
 | `py` no se reconoce | Reinstala Python marcando «Add python.exe to PATH» |
 
 ## Desinstalar
