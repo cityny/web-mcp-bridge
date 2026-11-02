@@ -56,6 +56,9 @@ El popup detecta los MCP configurados en `server/servers.json` (canal de descubr
    - prueba en Chromium con un DOM simulado.
 4. Instalación en Windows: `INSTALL.md` + `install.ps1`. Ya instalado y funcionando con `demo` en mi PC.
 6. Registro de eventos y errores (pestaña «Registro», exportación JSON).
+7. Editor de MCP dentro de la extensión, interfaz nueva (MCP / Actividad / Ajustes) y panel lateral.
+8. Actualización automática desde `main` (tarea programada + recarga de la extensión).
+9. AutoCAD conectado: MCP HTTP en `127.0.0.1:8765/mcp` vía `mcp-proxy` (Python), 16 herramientas.
 5. Descubrimiento de MCP desde el popup, recarga en caliente de `servers.json` y formatos `{nombre: {command, args, port}}` / `mcpServers`.
 
 ## Objetivos

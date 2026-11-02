@@ -68,3 +68,69 @@
 - Error visto por Isabel (`ws://127.0.0.1:8765 … 404`): la extensión no se había recargado tras el cambio de puerto.
 - `install_service.py` en Windows detiene ahora los puentes anteriores con PowerShell `-EncodedCommand` + CIM, tanto al instalar como al desinstalar. Antes, ejecutarlo directamente arrancaba un segundo puente y `--uninstall` no paraba `pythonw`. No probado en Windows.
 - Pruebas: `test_background` (eventos, recorte, origen, borrado) y prueba con la extensión real en Chromium (pestaña Registro + exportación).
+
+## 2026-11-02 — Claude (asistente de desarrollo) · Editor de MCP en la extensión
+- Petición de Isabel: no abrir `server\servers.json` a mano. Su MCP de AutoCAD es HTTP en `127.0.0.1:8765` (por eso ese puerto estaba ocupado).
+- Corrección a la recomendación de DeepSeek: `npx -y mcp-proxy` (npm) convierte de stdio a HTTP, que es al revés de lo que hace falta. El correcto es el `mcp-proxy` de Python con `--transport=streamablehttp URL` (verificado en `sparfenyuk/mcp-proxy`).
+- Puente:
+  - el canal de control acepta `get_config` y `put_config` solo de la extensión propietaria (`chrome-extension://kpjokcdpjbiljllmdobofmomhifebbbo`); el listado sigue abierto a cualquier extensión;
+  - `put_config` valida con la misma `load_config`, deja copia `.bak`, escribe de forma atómica y aplica al momento;
+  - si `servers.json` es inválido al arrancar, el puente arranca sin MCP para poder arreglarlo desde el editor.
+- Decisión de seguridad: fijar el ID de la extensión con `"key"` en `manifest.json` (la clave privada no se guarda). Así no hay claves que copiar. Coste: Chrome la trata como extensión nueva una vez (se pierden los ajustes guardados; los MCP se vuelven a detectar solos).
+- Extensión:
+  - nueva página `editor/` con plantillas (carpeta, HTTP vía mcp-proxy, personalizado), validación en vivo, vista previa de comandos (nuevo/modificado), confirmación, Ctrl+S, «Ordenar» y «Cambiar \ por /»;
+  - el popup tiene el botón «Añadir o editar MCP…»;
+  - en el registro no se guarda el contenido del archivo, solo su tamaño.
+- Pruebas: `test_bridge_config` (propietario frente a otra extensión o sin Origin, inválido sin cambios, válido + `.bak` + aplicado) y prueba con la extensión real en Chromium (plantilla HTTP → guardar → archivo y puente actualizados; ayuda de barras).
+
+## 2026-11-02 — Claude (asistente de desarrollo) · `autocad` no llegaba al puente
+- Diagnóstico con el registro exportado y `bridge.log` de Isabel: se guardó desde el editor con los MISMOS 2 MCP (demo y autocad-files) y ningún MCP nuevo arrancó. Isabel rellenó la plantilla pero no pulsó «Añadir a la configuración» antes de «Guardar». Es un fallo de diseño (dos pasos), no suyo.
+- Cambios:
+  - el editor, al guardar con una plantilla rellenada y sin añadir, pregunta si añadirla; tras añadir o guardar vacía la plantilla; el aviso de guardado nombra los MCP;
+  - el puente informa del último error de `servers.json` (`config_error` en el canal de control) y el popup lo muestra como aviso;
+  - el log del puente nombra los MCP al guardar y deja de escribir «connection open» en cada consulta (logger `websockets` en WARNING).
+- Pruebas: Chromium (plantilla sin añadir → pregunta → guardado con `autocad`; JSON roto → aviso en el popup) y `test_bridge_config` (`config_error` se informa y se limpia).
+
+## 2026-11-02 — Claude (asistente de desarrollo) · `autocad` se cae al activarlo
+- Registro de Isabel: `autocad` se añadió bien (puerto 8800 automático), pero al activarlo la conexión se cierra al instante («Conexión cerrada.») sin más detalle. El `ERR_CONNECTION_REFUSED` en el 8792 fue pasajero: el puente se reiniciaba y la extensión reconectó a los 8 s.
+- Causa probable: el puente no encuentra `mcp-proxy`, porque `pip` lo instala en `C:\Python314\Scripts`, que puede no estar en el PATH, o el proxy termina con error.
+- Cambios:
+  - el puente busca el ejecutable también en la carpeta `Scripts` del Python que lo ejecuta;
+  - si el comando no existe o el MCP termina al arrancar, cierra el WebSocket con el motivo (código de salida + última línea de stderr);
+  - `ws_client.js` guarda ese motivo como `lastError`, y el popup muestra el error bajo el MCP (antes solo como tooltip).
+- Prueba nueva `tests/test_bridge_errors.py` (comando inexistente y MCP que termina con código 3).
+
+## 2026-11-02 — Claude (asistente de desarrollo) · Causa: `mcp-proxy` instalado con `--user`
+- `pip show` de Isabel: `mcp-proxy` está en `C:\Users\…\AppData\Roaming\Python\Python314\site-packages`. `pip` lo instaló en modo usuario, porque `C:\Python314` no admite escritura sin permisos de administrador. Su `.exe` queda en `%APPDATA%\Python\Python314\Scripts`, que no está en el PATH ni en `C:\Python314\Scripts`. Por eso el puente daba `[WinError 2]` y la extensión mostraba «No se encontró o no se pudo ejecutar «mcp-proxy»» (la mejora anterior ya dio el motivo exacto).
+- Solución: `_resolve_executable` busca también en la carpeta de scripts de usuario (`sysconfig`, esquema `nt_user`).
+- Además: `ws_client.js` ya no registra un segundo «Conexión cerrada.» tras el motivo real (el handshake fallido no pisa el error de `onclose`).
+
+## 2026-11-02 — Isabel (usuaria) / Claude · AutoCAD conectado
+- Registro de Isabel: `autocad` (vía `mcp-proxy`, puerto 8800) conectado con 16 herramientas, `autocad-files` con 14. La cadena completa funciona en su PC: puente → mcp-proxy → MCP HTTP de AutoCAD.
+- Pendiente: prueba real desde DeepSeek. Con `mcp-proxy` funcionando, el soporte HTTP nativo deja de bloquear; queda como mejora (menos piezas que instalar).
+
+## 2026-11-02 — Claude (asistente de desarrollo) · Interfaz nueva y panel lateral (punto D)
+- Guía: Impeccable (`pbakaus/impeccable`), consultada en una carpeta temporal sin añadirla al repositorio. Modo «Operate»: claridad y densidad; iconos SVG propios en lugar de emoji/Unicode; estados completos (vacío que explica, error, deshabilitado, foco); un solo tipo de letra del sistema; color de acento solo para acciones y estados; foco, selección y barras de desplazamiento con los colores de la paleta; movimiento de 150 ms y sin animaciones decorativas.
+- Una sola página (`popup/popup.html`) para la ventana emergente y el panel lateral: detecta el contexto con `chrome.extension.getViews({type: 'popup'})`.
+- Pestañas:
+  - **MCP:** estado del puente local, «Detectar» y «Añadir o editar MCP», resumen de activos y tokens, permiso global, tarjetas con interruptor, estado, error en rojo, permiso y lista desplegable de herramientas;
+  - **Actividad:** llamadas y registro;
+  - **Ajustes:** «Abrir como panel lateral» y ajustes del chat.
+- Panel lateral: permiso `sidePanel`, `side_panel.default_path`, botón en la cabecera del popup y ajuste `preferSidePanel` (`action.setPopup('')` + `setPanelBehavior`). Verificado en Chromium.
+- El icono muestra el nº de MCP conectados.
+- El registro usa el nombre del MCP además del ID.
+- Resultados MCP: `structuredContent` de FastMCP (`{"result": "<mismo texto>"}`) ya no se duplica en el chat (el resultado de `estado` de AutoCAD llegaba dos veces y gastaba el doble de tokens).
+
+## 2026-11-02 — Claude (asistente de desarrollo) · Punto C: actualización automática
+- `scripts/windows/update.ps1`:
+  - solo actúa en `main` y sin cambios locales; hace `git fetch` + `merge --ff-only` (nunca sobrescribe trabajo local);
+  - reinicia el puente si cambió `server/`;
+  - escribe `update-stamp.json` (commit, rama, estado; ignorado por git) y anota en `server/update.log` (recortado a 500 líneas).
+- `install.ps1` registra la tarea programada `WebMCPBridge-Update` (cada 10 min, `wscript` + `.vbs` para no abrir ventanas) y ejecuta una primera comprobación. Opción `-NoAutoUpdate`.
+- Extensión:
+  - alarma cada minuto que lee `update-stamp.json` del propio directorio de la extensión (en las descomprimidas se lee del disco, verificado en Chromium);
+  - si el commit difiere del de arranque y no hay llamadas en curso, ejecuta `chrome.runtime.reload()`;
+  - la versión de arranque se guarda en `storage.session`, para que una versión llegada con el service worker dormido también provoque la recarga.
+- Ajustes: interruptor «Recargar la extensión al llegar una versión nueva» y estado (commit, rama, última comprobación).
+- Decisión: la extensión NUNCA ejecuta comandos. El `git pull` lo hace la tarea de Windows, y la extensión solo lee un archivo.
+- Verificado en Chromium: detección de la versión nueva desde el disco y orden de recarga. NO verificable aquí: la recarga en sí, porque en Chromium automatizado `chrome.runtime.reload()` bloquea incluso una extensión mínima de control (limitación del entorno de pruebas). Tampoco se ha ejecutado PowerShell. Queda para la prueba en Windows.

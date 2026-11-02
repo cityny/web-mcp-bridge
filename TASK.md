@@ -3,10 +3,12 @@
 ## En curso
 
 ## Pendiente
-- [ ] Punto D — Interfaz nueva + panel lateral (side panel) + gestión de MCP desde la extensión (crear/editar/quitar)
+- [ ] Fusionar el PR #2 y cambiar la carpeta de Isabel a `main` (`git checkout main`) para que funcione la actualización automática
+- [ ] Probar en Windows: tarea programada `WebMCPBridge-Update` y recarga automática de la extensión
+- [ ] Probar AutoCAD desde DeepSeek (Isabel)
+- [ ] Soporte HTTP nativo (Streamable HTTP) en la extensión: MCP con `"url"` en servers.json sin mcp-proxy (ya no bloquea: mcp-proxy funciona)
 - [ ] Cargar la extensión en Chrome y probar con `demo` en chat.deepseek.com (Isabel)
 - [ ] Punto D (resto) — Añadir/editar/quitar MCP desde el popup (escritura de servers.json vía puente, con clave y confirmación)
-- [ ] Punto C — Actualización automática desde `main` (tarea programada `git pull` + recarga de la extensión)
 - [ ] Llevar los cambios de la rama de desarrollo a `main`
 - [ ] Detección de fin de generación en DeepSeek: revisar con el DOM real (¿hay botón «detener» con etiqueta o atributo estable?) antes de tocar `GROW_MS`
 - [ ] Paso 4 — Actualizar README (DeepSeek soportado), descripción de `manifest.json` y `package.json`
@@ -21,3 +23,7 @@
 - [x] Punto D (parte 1) — Descubrimiento de MCP del PC desde el popup + recarga en caliente de servers.json + formatos {nombre:{command,args}} y mcpServers (2026-11-02)
 - [x] Punto B — Registro de eventos y errores: background/logger.js, pestaña «Registro» con filtro, exportación JSON y borrado (2026-11-02)
 - [x] `install_service.py` detiene los puentes anteriores en Windows (instalar y desinstalar) (2026-11-02)
+- [x] Punto D (parte 2) — Editor de servers.json en la extensión (plantillas, validación, vista previa, confirmación, .bak); ID fijo de la extensión (2026-11-02)
+- [x] AutoCAD (MCP HTTP) conectado vía mcp-proxy: 16 herramientas (2026-11-02)
+- [x] Punto D — Interfaz nueva (MCP / Actividad / Ajustes) y panel lateral (2026-11-02)
+- [x] Punto C — Actualización automática: `update.ps1` + tarea programada + recarga de la extensión por `update-stamp.json` (2026-11-02)

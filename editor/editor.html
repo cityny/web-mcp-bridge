@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MCP del PC · Web MCP Bridge</title>
+  <link rel="stylesheet" href="editor.css">
+</head>
+<body>
+  <header class="top">
+    <img src="../icons/icon48.png" alt="" width="28" height="28">
+    <div class="grow">
+      <h1>MCP de tu PC</h1>
+      <p class="muted" id="path">Cargando configuración…</p>
+    </div>
+    <button id="reload" type="button" class="ghost">Recargar</button>
+    <button id="save" type="button" class="primary" disabled>Guardar</button>
+  </header>
+
+  <main class="layout">
+    <!-- Plantillas -->
+    <section class="card">
+      <h2>Añadir un MCP</h2>
+      <label class="field">
+        <span>Tipo</span>
+        <select id="tpl-type">
+          <option value="folder">Archivos de una carpeta (servidor oficial)</option>
+          <option value="http">MCP por HTTP (vía mcp-proxy)</option>
+          <option value="custom">Personalizado (comando propio)</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>Nombre</span>
+        <input id="tpl-name" type="text" placeholder="p. ej. autocad" maxlength="40" spellcheck="false">
+      </label>
+      <label class="field" data-for="folder">
+        <span>Carpeta permitida</span>
+        <input id="tpl-folder" type="text" placeholder="C:/Users/tu-usuario/proyectos" spellcheck="false">
+        <small class="muted">Solo podrá leer y escribir dentro de esta carpeta. Necesita Node.js.</small>
+      </label>
+      <label class="field" data-for="http" hidden>
+        <span>Dirección del MCP</span>
+        <input id="tpl-url" type="text" placeholder="http://127.0.0.1:8765/mcp" spellcheck="false">
+        <small class="muted">Necesita <code>pip install mcp-proxy</code>. El MCP HTTP debe estar arrancado aparte.</small>
+      </label>
+      <label class="field" data-for="custom" hidden>
+        <span>Comando</span>
+        <input id="tpl-command" type="text" placeholder="python  ·  npx  ·  C:/ruta/programa.exe" spellcheck="false">
+      </label>
+      <label class="field" data-for="custom" hidden>
+        <span>Argumentos (uno por línea)</span>
+        <textarea id="tpl-args" rows="3" spellcheck="false" placeholder="-m&#10;mi_mcp"></textarea>
+      </label>
+      <label class="field">
+        <span>Puerto <small class="muted">(opcional; vacío = automático)</small></span>
+        <input id="tpl-port" type="number" min="1024" max="65535" placeholder="automático">
+      </label>
+      <button id="tpl-add" type="button" class="primary">Añadir a la configuración</button>
+      <p id="tpl-msg" class="msg" role="status"></p>
+    </section>
+
+    <!-- Editor -->
+    <section class="card editor">
+      <div class="row">
+        <h2>Configuración (<code>servers.json</code>)</h2>
+        <span class="row">
+          <button id="fix-slashes" type="button" class="ghost" hidden>Cambiar \ por /</button>
+          <button id="format" type="button" class="ghost">Ordenar</button>
+        </span>
+      </div>
+      <textarea id="content" spellcheck="false" aria-label="Contenido de servers.json"></textarea>
+      <p id="status" class="msg" role="status"></p>
+      <h2>Lo que se ejecutará</h2>
+      <table class="preview">
+        <thead><tr><th>MCP</th><th>Puerto</th><th>Comando</th><th></th></tr></thead>
+        <tbody id="preview"></tbody>
+      </table>
+      <p class="muted small">Al guardar, el puente aplica los cambios al momento y la extensión registra los MCP nuevos (desactivados). Se guarda una copia del archivo anterior en <code>servers.json.bak</code>.</p>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="editor.js" type="module"></script>
+</body>
+</html>

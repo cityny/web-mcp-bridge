@@ -7,7 +7,7 @@
  *   3. Exponer a popup y content scripts una API de mensajes (ver `handleMessage`).
  */
 import { McpConnection } from './ws_client.js';
-import { log, getLogs, clearLogs } from './logger.js';
+import { log, getLogs, clearLogs, flushLogs } from './logger.js';
 import {
   STORAGE_KEYS as KEYS, DEFAULT_SETTINGS, MAX_ACTIVE_SERVERS,
   CALL_TIMEOUT_MS, HISTORY_LIMIT, SUPPORTED_URL_PATTERNS, PERMISSIONS,
@@ -94,18 +94,33 @@ function logConnection(conn, evt) {
 
 function onConnectionChange(evt, conn) {
   if (conn) logConnection(conn, evt);
+  if (evt.next === 'connected' || evt.prev === 'connected') {
+    loadState().then(({ settings }) => updateBadge(settings.bridgeEnabled)).catch(() => {});
+  }
   if (evt.kind === 'tools' || evt.prev === 'connected' || evt.next === 'connected') scheduleBroadcast();
 }
 
 /** Alinea las conexiones abiertas con los servidores habilitados en storage. */
+/** Icono: «OFF» con el bridge apagado; si no, nº de MCP conectados (vacío si ninguno). */
 async function updateBadge(enabled) {
-  await chrome.action.setBadgeText({ text: enabled ? '' : 'OFF' });
-  await chrome.action.setBadgeBackgroundColor({ color: '#6b7280' });
+  const connected = [...connections.values()].filter((c) => c.status === 'connected').length;
+  await chrome.action.setBadgeText({ text: enabled ? (connected ? String(connected) : '') : 'OFF' });
+  await chrome.action.setBadgeBackgroundColor({ color: enabled ? '#0f766e' : '#6b7280' });
+}
+
+/** Panel lateral: si el usuario lo prefiere, el icono abre el panel en vez del popup. */
+let appliedPanelPref = null;
+async function applyActionBehavior(preferSidePanel) {
+  if (appliedPanelPref === preferSidePanel) return;
+  appliedPanelPref = preferSidePanel;
+  await chrome.action.setPopup?.({ popup: preferSidePanel ? '' : 'popup/popup.html' });
+  await chrome.sidePanel?.setPanelBehavior?.({ openPanelOnActionClick: Boolean(preferSidePanel) });
 }
 
 async function reconcile() {
   const { servers, settings } = await loadState();
   updateBadge(settings.bridgeEnabled).catch(() => {});
+  applyActionBehavior(Boolean(settings.preferSidePanel)).catch(() => {});
   // Con el bridge apagado no se mantiene ninguna conexión.
   const wanted = new Map((settings.bridgeEnabled ? servers : []).filter(isUsable).slice(0, MAX_ACTIVE_SERVERS).map((s) => [s.id, s]));
 
@@ -138,6 +153,8 @@ async function getSnapshot() {
   return {
     ok: true,
     settings,
+    bridge: bridgeStatus,
+    update: { ...update },
     max: MAX_ACTIVE_SERVERS,
     servers: servers.map((s) => {
       const conn = connections.get(s.id);
@@ -147,6 +164,7 @@ async function getSnapshot() {
         status: conn?.status ?? 'disconnected',
         error: conn?.lastError ?? null,
         toolCount: conn?.tools.length ?? 0,
+        tools: (conn?.tools ?? []).map((t) => ({ name: t.name, description: String(t.description ?? '').replace(/\s+/g, ' ').slice(0, 180) })),
         approxTokens: conn ? Math.ceil(JSON.stringify(conn.tools).length / 4) : 0,
       };
     }),
@@ -185,7 +203,15 @@ async function addHistory(entry) {
   });
 }
 
-async function callTool({ server, name, arguments: args }) {
+/** Llamadas a herramientas en curso: la extensión nunca se recarga en medio de una. */
+let inFlight = 0;
+
+async function callTool(msg) {
+  inFlight += 1;
+  try { return await callToolInner(msg); } finally { inFlight -= 1; }
+}
+
+async function callToolInner({ server, name, arguments: args }) {
   const { servers, settings } = await loadState();
   if (!settings.bridgeEnabled) return { ok: false, error: 'El bridge está desactivado.' };
   const slugs = assignSlugs(servers);
@@ -225,22 +251,46 @@ async function callTool({ server, name, arguments: args }) {
 
 // ───────────────────────── Descubrimiento de MCP del PC ─────────────────────────
 
-/** Pide al puente local la lista de MCP configurados en servers.json. */
-function fetchDiscovery(url = DISCOVERY_URL, timeout = DISCOVERY_TIMEOUT_MS) {
+/**
+ * Habla con el canal de control del puente local.
+ * Sin `request`: devuelve la lista de MCP configurados. Con `request`: la envía y devuelve la respuesta.
+ */
+function bridgeControl(request = null, { url = DISCOVERY_URL, timeout = DISCOVERY_TIMEOUT_MS } = {}) {
   return new Promise((resolve, reject) => {
     let ws;
-    const timer = setTimeout(() => { try { ws?.close(); } catch { /* noop */ } reject(new Error('El puente no respondió. ¿Está en marcha?')); }, timeout);
+    let listing = null;
+    const timer = setTimeout(() => { try { ws?.close(); } catch { /* noop */ } reject(new Error('El puente no respondió. ¿Está en marcha?')); }, request ? timeout + 10_000 : timeout);
     const done = (fn, value) => { clearTimeout(timer); try { ws.close(); } catch { /* noop */ } fn(value); };
     try { ws = new WebSocket(url); } catch (err) { clearTimeout(timer); reject(err); return; }
     ws.onmessage = (event) => {
-      try {
-        const msg = JSON.parse(event.data);
-        if (msg?.type !== 'servers' || !Array.isArray(msg.servers)) throw new Error('Respuesta inesperada del puente.');
-        done(resolve, msg.servers);
-      } catch (err) { done(reject, err); }
+      let msg;
+      try { msg = JSON.parse(event.data); } catch { done(reject, new Error('Respuesta inesperada del puente.')); return; }
+      if (!listing) {
+        if (msg?.type !== 'servers' || !Array.isArray(msg.servers)) { done(reject, new Error('Respuesta inesperada del puente.')); return; }
+        listing = msg;
+        if (!request) done(resolve, msg);
+        else ws.send(JSON.stringify(request));
+        return;
+      }
+      if (msg?.ok === false) done(reject, new Error(msg.error || 'El puente rechazó la petición.'));
+      else done(resolve, msg);
     };
     ws.onerror = () => done(reject, new Error(`No se pudo contactar con el puente local (${url}).`));
   });
+}
+
+/** Último estado conocido del puente local (lo muestra la interfaz). */
+const bridgeStatus = { ok: null, at: 0, count: 0, error: null, configError: null };
+
+async function fetchDiscovery() {
+  try {
+    const listing = await bridgeControl();
+    Object.assign(bridgeStatus, { ok: true, at: Date.now(), count: listing.servers.length, error: null, configError: listing.config_error ?? null });
+    return listing;
+  } catch (err) {
+    Object.assign(bridgeStatus, { ok: false, at: Date.now(), error: err.message });
+    throw err;
+  }
 }
 
 /** Puerto de una dirección ws:// local, o null si no es local. */
@@ -264,6 +314,7 @@ function validateUrl(raw) {
 function describeMutation(msg) {
   const { type, ...rest } = msg;
   if (type === 'UPDATE_SETTINGS') return { settings: rest.settings };
+  if (type === 'PUT_BRIDGE_CONFIG') return { bytes: String(rest.content ?? '').length }; // el contenido no se copia al registro
   return rest;
 }
 
@@ -274,6 +325,9 @@ const mutate = (fn) => withLock(async () => {
   scheduleBroadcast();
   return result ?? { ok: true };
 });
+
+/** Nombres de los MCP quitados (para el registro, que se escribe después de borrarlos). */
+const removedNames = new Map();
 
 const mutations = {
   ADD_SERVER: ({ name, url }) => mutate(async (servers, settings) => {
@@ -305,6 +359,8 @@ const mutations = {
   }),
 
   REMOVE_SERVER: ({ id }) => mutate(async (servers) => {
+    const gone = servers.find((s) => s.id === id);
+    if (gone) removedNames.set(id, gone.name);
     await saveServers(servers.filter((s) => s.id !== id));
   }),
 
@@ -330,7 +386,8 @@ const mutations = {
    * Se añaden DESACTIVADOS: el usuario elige cuáles activar con su interruptor.
    */
   DISCOVER_SERVERS: () => mutate(async (servers, settings) => {
-    const found = await fetchDiscovery();
+    const listing = await fetchDiscovery();
+    const found = listing.servers;
     const known = new Set(servers.map((s) => localPort(s.url)).filter(Boolean));
     const added = [];
     for (const item of found) {
@@ -342,7 +399,7 @@ const mutations = {
       added.push(name);
     }
     if (added.length) await saveServers(servers);
-    return { ok: true, found: found.length, added };
+    return { ok: true, found: found.length, added, configError: listing.config_error ?? null };
   }),
 
   UPDATE_SETTINGS: ({ settings: patch }) => mutate(async (_servers, settings) => {
@@ -389,6 +446,19 @@ async function handleMessage(msg, sender) {
       log(msg.level, msg.event, msg.details, { source: sourceOf(sender), platform: msg.platform });
       return { ok: true };
     case 'GET_LOGS': return { ok: true, logs: await getLogs() };
+    case 'GET_BRIDGE_CONFIG': {
+      const res = await bridgeControl({ type: 'get_config' });
+      return { ok: true, content: res.content, path: res.path };
+    }
+    case 'PUT_BRIDGE_CONFIG': {
+      const res = await bridgeControl({ type: 'put_config', content: String(msg.content ?? '') });
+      log('info', 'bridge.config_saved', { servers: res.servers?.map((s) => `${s.name}:${s.port}`) });
+      return { ok: true, servers: res.servers };
+    }
+    case 'CHECK_UPDATE': return { ok: true, update: await checkUpdate() };
+    case 'OPEN_EDITOR':
+      await chrome.tabs.create({ url: chrome.runtime.getURL('editor/editor.html') });
+      return { ok: true };
     case 'CLEAR_LOGS':
       await clearLogs();
       log('info', 'logs.cleared');
@@ -410,14 +480,19 @@ async function handleMessage(msg, sender) {
 const sourceOf = (sender) => (sender?.tab && !String(sender.url ?? '').startsWith('chrome-extension://') ? 'content' : 'popup');
 
 /** Mensajes que NO se registran (frecuentes o de solo lectura). */
-const QUIET = new Set(['SLEEP', 'GET_STATE', 'GET_ACTIVE_TOOLS', 'GET_HISTORY', 'GET_LOGS', 'CLEAR_LOGS', 'LOG', 'CALL_TOOL', 'FOCUS_TAB', 'RESTORE_FOCUS']);
+const QUIET = new Set(['CHECK_UPDATE', 'SLEEP', 'GET_STATE', 'GET_ACTIVE_TOOLS', 'GET_HISTORY', 'GET_LOGS', 'CLEAR_LOGS', 'LOG', 'CALL_TOOL', 'GET_BRIDGE_CONFIG', 'OPEN_EDITOR', 'FOCUS_TAB', 'RESTORE_FOCUS']);
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   handleMessage(msg, sender)
     .then((res) => {
       if (!QUIET.has(msg?.type)) {
         const level = res?.ok === false ? 'warn' : 'info';
-        log(level, `action.${String(msg?.type).toLowerCase()}`, { ...describeMutation(msg), ...(res?.ok === false ? { error: res.error } : {}) }, { source: sourceOf(sender) });
+        const details = { ...describeMutation(msg), ...(res?.ok === false ? { error: res.error } : {}) };
+        const write = () => log(level, `action.${String(msg?.type).toLowerCase()}`, details, { source: sourceOf(sender) });
+        if (msg?.id) { // nombre legible del MCP en vez de solo su ID
+          (msg.type === 'REMOVE_SERVER' ? Promise.resolve(removedNames.get(msg.id)) : loadState().then(({ servers }) => servers.find((s) => s.id === msg.id)?.name))
+            .then((name) => { if (name) details.server = name; }).catch(() => {}).finally(write);
+        } else write();
       }
       sendResponse(res);
     })
@@ -437,11 +512,58 @@ chrome.runtime.onInstalled.addListener(async () => {
   await reconcile();
 });
 
-// Red de seguridad: si el SW se duerme, la alarma lo despierta y reconecta.
+// ───────────────────────── Actualización automática ─────────────────────────
+// La tarea programada (scripts/windows/update.ps1) baja la versión nueva de main y escribe update-stamp.json.
+// La extensión, cargada desde esa carpeta, lee el sello: si el commit cambió desde que arrancó, se recarga sola.
+
+const update = { bootCommit: null, commit: null, branch: null, status: null, checkedAt: null, pendingReload: false };
+
+async function readStamp() {
+  try {
+    const res = await fetch(chrome.runtime.getURL('update-stamp.json'), { cache: 'no-store' });
+    return res.ok ? await res.json() : null;
+  } catch { return null; } // sin sello: la actualización automática no está instalada
+}
+
+/**
+ * Commit con el que se CARGÓ la extensión. Se guarda en storage.session: sobrevive a que Chrome duerma y despierte el
+ * service worker (si no, una versión llegada mientras dormía se tomaría como «la de arranque» y nunca se recargaría),
+ * y se borra al recargar la extensión o reiniciar el navegador.
+ */
+async function bootCommit(current) {
+  const area = chrome.storage.session;
+  if (!area) return current;
+  const saved = (await area.get('wmb_boot_commit')).wmb_boot_commit;
+  if (saved) return saved;
+  if (current) await area.set({ wmb_boot_commit: current });
+  return current;
+}
+
+async function checkUpdate() {
+  const stamp = await readStamp();
+  if (stamp) {
+    Object.assign(update, { commit: stamp.commit ?? null, branch: stamp.branch ?? null, status: stamp.status ?? null, checkedAt: stamp.checkedAt ?? null });
+    if (!update.bootCommit) update.bootCommit = await bootCommit(stamp.commit ?? null);
+  }
+  const { settings } = await loadState();
+  const changed = Boolean(update.bootCommit && update.commit && update.commit !== update.bootCommit);
+  update.pendingReload = changed;
+  if (changed && settings.autoUpdate !== false && inFlight === 0) {
+    log('info', 'update.reload', { from: update.bootCommit.slice(0, 7), to: update.commit.slice(0, 7) });
+    await flushLogs();
+    setTimeout(() => chrome.runtime.reload(), 300);
+  }
+  return { ...update };
+}
+
+// Red de seguridad: si el SW se duerme, la alarma lo despierta y reconecta. Cada minuto, además, se mira si hay versión nueva.
 chrome.alarms.create('wmb-keepalive', { periodInMinutes: 0.5 });
+chrome.alarms.create('wmb-update', { periodInMinutes: 1 });
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === 'wmb-keepalive') reconcile().catch((err) => log('error', 'reconcile', { error: err.message }));
+  if (alarm.name === 'wmb-update') checkUpdate().catch(() => {});
 });
+checkUpdate().catch(() => {});
 
 log('info', 'sw.start', { version: chrome.runtime.getManifest?.().version });
 reconcile().catch((err) => { console.error('[WMB] reconcile', err); log('error', 'reconcile', { error: err.message }); });

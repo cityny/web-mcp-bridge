@@ -61,6 +61,7 @@ export class McpConnection {
 
     ws.onopen = () => {
       this.#handshake().catch((err) => {
+        if (this.#ws !== ws) return; // la conexión ya se cerró (onclose ya guardó el motivo real): no se pisa
         this.lastError = err.message;
         this.#setStatus('error');
         ws.close();
@@ -70,8 +71,11 @@ export class McpConnection {
     ws.onerror = () => {
       this.lastError = 'No se pudo conectar con el servidor MCP.';
     };
-    ws.onclose = () => {
+    ws.onclose = (event) => {
       if (this.#ws !== ws) return;
+      // El puente explica por qué cerró (MCP no encontrado, terminó con error…): se muestra en el popup y el registro.
+      if (event?.reason) this.lastError = event.reason;
+      else if (event?.code && event.code !== 1000 && event.code !== 1005) this.lastError = `Conexión cerrada (código ${event.code}).`;
       this.#ws = null;
       this.#teardown();
       if (!this.#closedByUser) {

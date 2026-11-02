@@ -50,6 +50,7 @@ import logging
 import os
 import shutil
 import sys
+import sysconfig
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import parse_qs, urlparse
@@ -63,6 +64,10 @@ log = logging.getLogger("mcp_ws_bridge")
 
 STDIO_LIMIT = 32 * 1024 * 1024  # tamaño máximo de un mensaje JSON-RPC
 CONTROL_PORT = 47615              # canal de descubrimiento (lista de servidores configurados)
+# ID fijo de la extensión (campo "key" de manifest.json). Solo ella puede LEER o ESCRIBIR servers.json.
+EXTENSION_ID = "kpjokcdpjbiljllmdobofmomhifebbbo"
+CONTROL_REQUEST_TIMEOUT = 10     # segundos que el canal espera una petición tras enviar la lista
+MAX_CONFIG_BYTES = 256 * 1024
 AUTO_PORT_START = 8800           # primer puerto para entradas sin `port`
 RELOAD_INTERVAL = 2.0            # segundos entre comprobaciones de cambios en servers.json
 ALLOWED_ORIGIN_PREFIXES = ("chrome-extension://", "moz-extension://")
@@ -103,8 +108,36 @@ def _token_ok(path: str, cfg: ServerConfig) -> bool:
     return hmac.compare_digest(supplied, cfg.token)
 
 
+def _resolve_executable(command: str) -> str:
+    """Encuentra el ejecutable: PATH (resuelve npx.cmd en Windows) y, si no, la carpeta de scripts del Python
+    que ejecuta el puente (p. ej. C:\\Python314\\Scripts\\mcp-proxy.exe aunque esa carpeta no esté en el PATH)."""
+    found = shutil.which(command)
+    if found:
+        return found
+    base = Path(sys.executable).parent
+    folders = [base / "Scripts", base, base.parent / "Scripts"]
+    # Instalaciones con `pip install --user` (lo que hace pip cuando la carpeta de Python no admite escritura):
+    # en Windows van a %APPDATA%\\Python\\Python3XX\\Scripts, que normalmente NO está en el PATH.
+    scheme = "nt_user" if os.name == "nt" else ("osx_framework_user" if sys.platform == "darwin" else "posix_user")
+    try:
+        folders.append(Path(sysconfig.get_path("scripts", scheme)))
+    except (KeyError, ValueError):
+        pass
+    for folder in folders:
+        found = shutil.which(command, path=str(folder))
+        if found:
+            return found
+    return command
+
+
+def _close_reason(text: str) -> str:
+    """Motivo de cierre de WebSocket: máximo 123 bytes UTF-8."""
+    data = text.encode("utf-8")[:120]
+    return data.decode("utf-8", errors="ignore")
+
+
 async def _spawn(cfg: ServerConfig) -> asyncio.subprocess.Process:
-    executable = shutil.which(cfg.command[0]) or cfg.command[0]  # resuelve npx.cmd en Windows
+    executable = _resolve_executable(cfg.command[0])
     extra = {"creationflags": 0x08000000} if sys.platform == "win32" else {}  # CREATE_NO_WINDOW
     return await asyncio.create_subprocess_exec(
         executable,
@@ -173,13 +206,17 @@ async def _ws_to_stdin(proc: asyncio.subprocess.Process, ws) -> None:
         await proc.stdin.drain()
 
 
-async def _log_stderr(proc: asyncio.subprocess.Process, name: str) -> None:
+async def _log_stderr(proc: asyncio.subprocess.Process, name: str, tail: list[str] | None = None) -> None:
     assert proc.stderr is not None
     while True:
         line = await proc.stderr.readline()
         if not line:
             return
-        log.info("[%s] %s", name, line.decode("utf-8", errors="replace").rstrip())
+        text = line.decode("utf-8", errors="replace").rstrip()
+        log.info("[%s] %s", name, text)
+        if tail is not None and text.strip():
+            tail.append(text.strip())
+            del tail[:-5]
 
 
 # ───────────────────────── Servidor ─────────────────────────
@@ -199,19 +236,32 @@ async def handle_client(ws, cfg: ServerConfig) -> None:
 
     try:
         proc = await _spawn(cfg)
-    except (FileNotFoundError, PermissionError) as err:
+    except (FileNotFoundError, PermissionError, OSError) as err:
         log.error("[%s] No se pudo ejecutar %s: %s", cfg.name, cfg.command, err)
-        await ws.close(1011, "No se pudo iniciar el servidor MCP")
+        await ws.close(1011, _close_reason(f"No se encontró o no se pudo ejecutar «{cfg.command[0]}»"))
         return
 
     log.info("[%s] Cliente conectado → pid %s", cfg.name, proc.pid)
-    pipes = {
-        asyncio.create_task(_stdout_to_ws(proc, ws)),
-        asyncio.create_task(_ws_to_stdin(proc, ws)),
-    }
-    stderr_task = asyncio.create_task(_log_stderr(proc, cfg.name))
+    stdout_task = asyncio.create_task(_stdout_to_ws(proc, ws))
+    pipes = {stdout_task, asyncio.create_task(_ws_to_stdin(proc, ws))}
+    stderr_tail: list[str] = []
+    stderr_task = asyncio.create_task(_log_stderr(proc, cfg.name, stderr_tail))
     try:
-        await asyncio.wait(pipes, return_when=asyncio.FIRST_COMPLETED)
+        done, _ = await asyncio.wait(pipes, return_when=asyncio.FIRST_COMPLETED)
+        # El MCP terminó por su cuenta (stdout cerrado): se cierra el WebSocket explicando por qué.
+        if stdout_task in done:
+            try:
+                await asyncio.wait_for(proc.wait(), 2)
+            except asyncio.TimeoutError:
+                pass
+        if stdout_task in done and proc.returncode is not None:
+            await asyncio.sleep(0.2)  # últimas líneas de stderr
+            detail = stderr_tail[-1] if stderr_tail else "sin mensaje de error"
+            log.warning("[%s] El MCP terminó (código %s): %s", cfg.name, proc.returncode, detail)
+            try:
+                await ws.close(1011, _close_reason(f"El MCP terminó (código {proc.returncode}): {detail}"))
+            except Exception:  # noqa: BLE001
+                pass
     finally:
         for task in (*pipes, stderr_task):
             task.cancel()
@@ -237,8 +287,12 @@ async def _close(server) -> None:
 class BridgeManager:
     """Mantiene un listener WebSocket por servidor MCP y lo alinea con la configuración (recarga en caliente)."""
 
-    def __init__(self) -> None:
+    def __init__(self, config_path: Path | None = None, owner_origin: str | None = None) -> None:
         self.active: dict[str, tuple[ServerConfig, object]] = {}
+        self.config_path = config_path
+        self.owner_origin = owner_origin
+        self.write_lock = asyncio.Lock()
+        self.config_error: str | None = None  # último error al leer servers.json (se muestra en la extensión)
 
     def listing(self) -> list[dict]:
         return [
@@ -269,16 +323,84 @@ class BridgeManager:
         self.active.clear()
 
 
+async def _reply(ws, **payload) -> None:
+    await ws.send(json.dumps(payload, ensure_ascii=False))
+
+
+async def _write_config(manager: BridgeManager, content: str) -> list[ServerConfig]:
+    """Valida, guarda (con copia .bak) y aplica una configuración nueva. Lanza ValueError si no es válida."""
+    if len(content.encode("utf-8")) > MAX_CONFIG_BYTES:
+        raise ValueError("la configuración es demasiado grande")
+    path = manager.config_path
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(content, encoding="utf-8")
+    try:
+        configs = load_config(tmp)  # misma validación que al arrancar
+    except Exception:
+        tmp.unlink(missing_ok=True)
+        raise
+    if path.exists():
+        path.with_name(path.name + ".bak").write_text(path.read_text(encoding="utf-8-sig"), encoding="utf-8")
+    os.replace(tmp, path)
+    await manager.apply(configs)
+    return configs
+
+
 async def handle_control(ws, manager: BridgeManager) -> None:
-    """Canal de descubrimiento: envía la lista de servidores configurados y cierra."""
+    """Canal de control.
+
+    - Al conectarse: envía la lista de servidores configurados (lectura, cualquier extensión).
+    - Después acepta UNA petición, solo de la extensión propietaria (`owner_origin`):
+        {"type": "get_config"}                 → {"type": "config", "content": "<servers.json>", "path": "..."}
+        {"type": "put_config", "content": "…"} → {"type": "result", "ok": true, "servers": [...]} | {"ok": false, "error": "…"}
+    """
     _, headers = _request_parts(ws)
     origin = headers.get("Origin")
     if not (origin is None or origin.startswith(ALLOWED_ORIGIN_PREFIXES)):
         log.warning("[control] Conexión rechazada: Origin no permitido (%s)", origin)
         await ws.close(1008, "Origin no permitido")
         return
-    await ws.send(json.dumps({"type": "servers", "servers": manager.listing()}, ensure_ascii=False))
-    await ws.close()
+    await _reply(ws, type="servers", servers=manager.listing(), editable=bool(manager.config_path),
+                 config_error=manager.config_error)
+    try:
+        raw = await asyncio.wait_for(ws.recv(), CONTROL_REQUEST_TIMEOUT)
+    except Exception:  # noqa: BLE001  (el cliente cerró o no pidió nada)
+        return
+    try:
+        request = json.loads(raw)
+        kind = request.get("type")
+    except (ValueError, AttributeError):
+        await _reply(ws, type="result", ok=False, error="petición no válida")
+        return
+    if kind not in ("get_config", "put_config"):
+        await _reply(ws, type="result", ok=False, error=f"petición desconocida: {kind}")
+        return
+    if not manager.config_path:
+        await _reply(ws, type="result", ok=False, error="el puente no se inició con --config")
+        return
+    if origin != manager.owner_origin:
+        log.warning("[control] %s rechazado: solo la extensión Web MCP Bridge puede usarlo (Origin %s)", kind, origin)
+        await _reply(ws, type="result", ok=False, error="no autorizado")
+        return
+    if kind == "get_config":
+        path = manager.config_path
+        content = path.read_text(encoding="utf-8-sig") if path.exists() else '{\n}\n'
+        await _reply(ws, type="config", content=content, path=str(path))
+        return
+    content = request.get("content")
+    if not isinstance(content, str):
+        await _reply(ws, type="result", ok=False, error="falta el contenido")
+        return
+    async with manager.write_lock:
+        try:
+            configs = await _write_config(manager, content)
+        except Exception as err:  # noqa: BLE001
+            log.warning("[control] servers.json NO guardado: %s", err)
+            await _reply(ws, type="result", ok=False, error=str(err))
+            return
+    manager.config_error = None
+    log.info("✎ servers.json guardado desde la extensión (%d servidor(es)): %s", len(configs), ", ".join(c.name for c in configs))
+    await _reply(ws, type="result", ok=True, servers=manager.listing())
 
 
 async def _watch_config(path: Path, manager: BridgeManager) -> None:
@@ -299,18 +421,26 @@ async def _watch_config(path: Path, manager: BridgeManager) -> None:
             configs = load_config(path)
         except Exception as err:  # noqa: BLE001
             log.error("servers.json inválido, se mantiene la configuración anterior: %s", err)
+            manager.config_error = str(err)
             continue
+        manager.config_error = None
         log.info("↻ servers.json cambió: aplicando %d servidor(es)", len(configs))
         await manager.apply(configs)
 
 
-async def run(configs: list[ServerConfig], config_path: Path | None = None, control_port: int = 0) -> None:
-    manager = BridgeManager()
+async def run(configs: list[ServerConfig], config_path: Path | None = None, control_port: int = 0,
+              owner_origin: str | None = None) -> None:
+    manager = BridgeManager(config_path, owner_origin or f"chrome-extension://{EXTENSION_ID}")
     control = None
     tasks = []
+    if config_path and not configs:
+        try:
+            load_config(config_path)  # solo para conocer el error y mostrarlo en la extensión
+        except Exception as err:  # noqa: BLE001
+            manager.config_error = str(err)
     try:
         await manager.apply(configs)
-        if not manager.active:
+        if not manager.active and not config_path:  # con --config se sigue: el editor de la extensión puede arreglarlo
             raise OSError("ningún servidor pudo arrancar")
         if control_port:
             try:
@@ -387,7 +517,7 @@ def load_config(path: Path) -> list[ServerConfig]:
     return configs
 
 
-def parse_args(argv: list[str] | None = None) -> tuple[list[ServerConfig], Path | None, int]:
+def parse_args(argv: list[str] | None = None) -> tuple[list[ServerConfig], Path | None, int, str]:
     parser = argparse.ArgumentParser(
         description="Puente WebSocket ⇄ MCP (stdio) para Web MCP Bridge.",
         usage="%(prog)s [--port N] [--name NOMBRE] -- COMANDO [ARGS…]\n       %(prog)s --config servers.json",
@@ -400,6 +530,8 @@ def parse_args(argv: list[str] | None = None) -> tuple[list[ServerConfig], Path 
     parser.add_argument("--cwd", help="Directorio de trabajo del servidor MCP")
     parser.add_argument("--control-port", type=int, default=None,
                         help=f"Canal de descubrimiento (por defecto {CONTROL_PORT} con --config; 0 = desactivado)")
+    parser.add_argument("--extension-id", default=EXTENSION_ID,
+                        help="ID de la extensión autorizada a leer/editar servers.json desde el popup")
     parser.add_argument("--log-file", type=Path, help="Escribe los logs en este archivo (útil como servicio)")
     parser.add_argument("-v", "--verbose", action="store_true")
     parser.add_argument("command", nargs=argparse.REMAINDER, help="Comando que lanza el servidor MCP (stdio)")
@@ -412,26 +544,34 @@ def parse_args(argv: list[str] | None = None) -> tuple[list[ServerConfig], Path 
         filename=str(args.log_file) if args.log_file else None,
         encoding="utf-8" if args.log_file else None,
     )
+    logging.getLogger("websockets").setLevel(logging.WARNING)  # sin «connection open» en cada consulta del popup
 
     if args.config:
         control = CONTROL_PORT if args.control_port is None else args.control_port
-        return load_config(args.config), args.config, control
+        owner = f"chrome-extension://{args.extension_id}"
+        try:
+            configs = load_config(args.config)
+        except (OSError, ValueError) as err:
+            # Se arranca igualmente (sin MCP) para poder corregir servers.json desde la extensión.
+            log.error("servers.json no es válido (%s). Arranco sin MCP: corrígelo desde la extensión.", err)
+            configs = []
+        return configs, args.config.resolve(), control, owner
 
     command = args.command[1:] if args.command[:1] == ["--"] else args.command
     if not command:
         parser.error("indica el comando del servidor MCP tras `--` o usa --config")
     single = [ServerConfig(name=args.name, command=command, port=args.port, host=args.host, cwd=args.cwd, token=args.token)]
-    return single, None, args.control_port or 0
+    return single, None, args.control_port or 0, f"chrome-extension://{args.extension_id}"
 
 
 def main(argv: list[str] | None = None) -> int:
     try:
-        configs, config_path, control_port = parse_args(argv)
+        configs, config_path, control_port, owner = parse_args(argv)
     except (OSError, ValueError) as err:  # servers.json ausente, JSON inválido o formato no reconocido
         log.error("No se pudo leer la configuración: %s", err)
         return 1
     try:
-        asyncio.run(run(configs, config_path, control_port))
+        asyncio.run(run(configs, config_path, control_port, owner))
     except KeyboardInterrupt:
         log.info("Detenido.")
     except OSError as err:

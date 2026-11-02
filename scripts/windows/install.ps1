@@ -13,11 +13,18 @@
     4. Comprueba que responde el puente (canal de descubrimiento 127.0.0.1:47615) y lista sus MCP.
     5. Copia al portapapeles la ruta de la extension y abre chrome://extensions.
 
-  Desinstalar el arranque automatico:
+  Opciones:
+      -NoAutoUpdate   no registrar (o quitar) la actualizacion automatica desde main
+
+  Desinstalar el arranque automatico y la actualizacion automatica:
       python server\install_service.py --uninstall
+      Unregister-ScheduledTask -TaskName WebMCPBridge-Update -Confirm:$false
 #>
 [CmdletBinding()]
-param()
+param(
+  # No registrar la actualizacion automatica (tarea programada que sigue la rama main).
+  [switch]$NoAutoUpdate
+)
 $ErrorActionPreference = 'Stop'
 
 function Step($text) { Write-Host "`n> $text" -ForegroundColor Cyan }
@@ -89,6 +96,34 @@ for ($i = 0; $i -lt 10 -and -not $servers; $i++) {
 }
 if ($servers) { Ok "Puente activo. MCP configurados: $servers" }
 else { Write-Host "  AVISO  El puente no responde en 47615. Revisa: Get-Content server\bridge.log -Tail 20 -Encoding UTF8" -ForegroundColor Yellow }
+
+# 4b) Actualizacion automatica: tarea programada cada 10 minutos, sin ventana
+Step 'Actualizacion automatica (rama main)'
+$TaskName = 'WebMCPBridge-Update'
+if ($NoAutoUpdate) {
+  Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction SilentlyContinue
+  Ok 'Desactivada (-NoAutoUpdate).'
+} else {
+  try {
+    $updater = Join-Path $Repo 'scripts\windows\update.ps1'
+    $vbs = Join-Path $Repo 'scripts\windows\update-hidden.vbs'
+    # wscript + .vbs: ejecuta PowerShell sin que aparezca ninguna ventana cada 10 minutos
+    $cmd = 'powershell.exe -NoProfile -ExecutionPolicy Bypass -File ""{0}"" -Python ""{1}""' -f $updater, $Python
+    [System.IO.File]::WriteAllText($vbs, ('CreateObject("Wscript.Shell").Run "{0}", 0, False' -f $cmd) + "`r`n", (New-Object System.Text.UTF8Encoding($false)))
+    $action = New-ScheduledTaskAction -Execute 'wscript.exe' -Argument ('"{0}"' -f $vbs)
+    $trigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 10)
+    $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit (New-TimeSpan -Minutes 5)
+    Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings -Description 'Web MCP Bridge: actualiza desde la rama main cada 10 minutos' -Force | Out-Null
+    $ErrorActionPreference = 'Continue'   # git/powershell pueden escribir en stderr sin que sea un error
+    $current = (git -C $Repo rev-parse --abbrev-ref HEAD 2>$null | Out-String).Trim()
+    if ($current -eq 'main') { Ok 'Activada: cada 10 minutos se baja la version nueva de main.' }
+    else { Write-Host "  AVISO  La carpeta esta en la rama '$current'. La actualizacion automatica solo sigue main: cambia con  git checkout main" -ForegroundColor Yellow }
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $updater -Python $Python   # primera comprobacion (crea update-stamp.json)
+    $ErrorActionPreference = 'Stop'
+  } catch {
+    Write-Host "  AVISO  No se pudo registrar la tarea programada: $($_.Exception.Message)" -ForegroundColor Yellow
+  }
+}
 
 # 5) Extension en Chrome
 Step 'Cargar la extension en Chrome'
