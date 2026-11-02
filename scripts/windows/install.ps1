@@ -10,7 +10,7 @@
     3. Ejecuta server\install_service.py: instala dependencias, registra el arranque automatico
        al iniciar sesion y arranca el puente en segundo plano.
     (Antes de 3 detiene un puente anterior, asi se puede volver a ejecutar sin conflictos de puerto.)
-    4. Comprueba que el puente responde (canal de descubrimiento 127.0.0.1:8765).
+    4. Comprueba que responde el puente (canal de descubrimiento 127.0.0.1:47615) y lista sus MCP.
     5. Copia al portapapeles la ruta de la extension y abre chrome://extensions.
 
   Desinstalar el arranque automatico:
@@ -74,18 +74,28 @@ Step 'Instalando el puente (arranque automatico al iniciar sesion)'
 & $Python (Join-Path $Repo 'server\install_service.py')
 if ($LASTEXITCODE -ne 0) { Fail 'install_service.py fallo (mira el mensaje anterior).' }
 
-# 4) Verificar que el puente escucha
-Step 'Comprobando que el puente responde (descubrimiento en 127.0.0.1:8765)'
-$listening = $false
-for ($i = 0; $i -lt 10 -and -not $listening; $i++) {
+# 4) Verificar que responde EL PUENTE (no otro programa que use el mismo puerto)
+Step 'Comprobando que el puente responde (descubrimiento en 127.0.0.1:47615)'
+$probe = @'
+import asyncio, json, sys, websockets
+async def main():
+    async with websockets.connect("ws://127.0.0.1:47615", open_timeout=3) as ws:
+        msg = json.loads(await asyncio.wait_for(ws.recv(), 3))
+    assert msg.get("type") == "servers"
+    print(", ".join(f"{s['name']} ({s['port']})" for s in msg["servers"]) or "(ninguno)")
+try:
+    asyncio.run(main())
+except Exception:
+    sys.exit(1)
+'@
+$servers = $null
+for ($i = 0; $i -lt 10 -and -not $servers; $i++) {
   Start-Sleep -Seconds 1
-  try {
-    $client = New-Object System.Net.Sockets.TcpClient
-    $client.Connect('127.0.0.1', 8765); $listening = $client.Connected; $client.Close()
-  } catch { }
+  $out = & $Python -c $probe 2>$null
+  if ($LASTEXITCODE -eq 0) { $servers = ($out -join ' ') }
 }
-if ($listening) { Ok 'Puente activo.' }
-else { Write-Host "  AVISO  El puerto 8765 no responde todavia. Revisa server\bridge.log" -ForegroundColor Yellow }
+if ($servers) { Ok "Puente activo. MCP configurados: $servers" }
+else { Write-Host "  AVISO  El puente no responde en 47615. Revisa: Get-Content server\bridge.log -Tail 20 -Encoding UTF8" -ForegroundColor Yellow }
 
 # 5) Extension en Chrome
 Step 'Cargar la extension en Chrome'

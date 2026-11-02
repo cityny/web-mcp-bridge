@@ -42,7 +42,7 @@ export const DEFAULT_SETTINGS = {
 export const DEMO_SERVER = { name: 'demo', url: 'ws://localhost:8090' };
 
 /** Canal de descubrimiento del puente local: devuelve los MCP configurados en server/servers.json. */
-export const DISCOVERY_URL = 'ws://127.0.0.1:8765';
+export const DISCOVERY_URL = 'ws://127.0.0.1:47615';
 export const DISCOVERY_TIMEOUT_MS = 3000;
 
 export const PROTOCOL_VERSION = '2025-03-26';

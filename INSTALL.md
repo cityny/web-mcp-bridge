@@ -43,7 +43,7 @@ El script:
 2. Crea `server\servers.json` solo con el servidor de prueba `demo` (puerto 8090), si no existe.
 3. Detiene un puente anterior, si lo hay (evita el error «solo se permite un uso de cada dirección»).
 4. Instala dependencias, registra el arranque automático al iniciar sesión y arranca el puente en segundo plano.
-5. Comprueba que el puente responde (canal de descubrimiento, puerto 8765), copia la ruta de la extensión al portapapeles y abre `chrome://extensions`.
+5. Comprueba que el puente responde (canal de descubrimiento, puerto 47615), copia la ruta de la extensión al portapapeles y abre `chrome://extensions`.
 
 ## 3. Cargar la extensión en Chrome
 
@@ -85,7 +85,7 @@ Formatos admitidos (puedes usar cualquiera):
 
 | Síntoma | Qué mirar |
 |---|---|
-| El servidor sale en rojo en el popup | `server\bridge.log`; vuelve a ejecutar el script de instalación |
+| El servidor sale en rojo en el popup | `Get-Content server\bridge.log -Tail 20 -Encoding UTF8`; vuelve a ejecutar el script de instalación |
 | «La extensión se actualizó: recarga la pestaña» | Recarga la pestaña del chat (F5) |
 | La IA no usa la herramienta | Botón **Inyectar instrucciones** en el panel del chat |
 | `py` no se reconoce | Reinstala Python marcando «Add python.exe to PATH» |

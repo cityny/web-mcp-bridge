@@ -211,7 +211,7 @@ function fetchDiscovery(url = DISCOVERY_URL, timeout = DISCOVERY_TIMEOUT_MS) {
         done(resolve, msg.servers);
       } catch (err) { done(reject, err); }
     };
-    ws.onerror = () => done(reject, new Error('No se pudo contactar con el puente local (ws://127.0.0.1:8765).'));
+    ws.onerror = () => done(reject, new Error(`No se pudo contactar con el puente local (${url}).`));
   });
 }
 

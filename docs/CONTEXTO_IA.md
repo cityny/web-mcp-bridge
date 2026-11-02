@@ -30,7 +30,7 @@ Las tres piezas:
    - aplica el permiso de ese MCP (permitir siempre / preguntar / no permitir);
    - ejecuta la llamada vía puente y devuelve el resultado al chat.
 
-El popup detecta los MCP configurados en `server/servers.json` (canal de descubrimiento del puente en `ws://127.0.0.1:8765`) y los añade desactivados; también se pueden registrar a mano por URL (`ws://localhost:<puerto>`). El puente recarga `servers.json` solo al guardarlo. Puedo registrar los que quiera, pero solo 5 pueden estar activos a la vez, porque cada MCP activo consume tokens de contexto. Cada uno se activa o desactiva con un interruptor.
+El popup detecta los MCP configurados en `server/servers.json` (canal de descubrimiento del puente en `ws://127.0.0.1:47615`) y los añade desactivados; también se pueden registrar a mano por URL (`ws://localhost:<puerto>`). El puente recarga `servers.json` solo al guardarlo. Puedo registrar los que quiera, pero solo 5 pueden estar activos a la vez, porque cada MCP activo consume tokens de contexto. Cada uno se activa o desactiva con un interruptor.
 
 ## Estructura del código
 | Ruta | Rol |

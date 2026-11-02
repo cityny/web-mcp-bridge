@@ -41,3 +41,10 @@
 - Decisión: el descubrimiento NO expone los comandos, solo nombre y puerto. Escribir `servers.json` desde el popup queda para más adelante, con clave y confirmación.
 - `install.ps1` comprueba ahora el puerto 8765 en vez del 8090 (el demo puede no estar en su configuración).
 - Pruebas: `tests/test_bridge_config.py` (formatos, descubrimiento, rechazo de una web, recarga, JSON inválido, quitar un servidor) y una prueba manual automatizada con la extensión real en Chromium: detección → activar → «Conectado».
+
+## 2026-11-02 — Claude (asistente de desarrollo) · Conflicto de puerto del descubrimiento
+- En el PC de Isabel el puerto 8765 ya lo usa otro programa: el canal de descubrimiento no arrancaba y la comprobación de `install.ps1` daba un falso «Puente activo», porque solo probaba la conexión TCP y respondía el otro programa.
+- Decisión: mover el canal de descubrimiento a 47615 (puerto poco común y fuera del rango efímero de Windows, que empieza en 49152).
+- `install.ps1` comprueba ahora la respuesta real del puente (`type: "servers"`) con Python + websockets y lista los MCP configurados. Verificado contra el puente real (OK) y contra otro programa en el puerto (rechazado).
+- El log explica que, si el puerto está ocupado, los MCP siguen funcionando pero no se pueden detectar.
+- Nota: en PowerShell 5.1, `Get-Content` necesita `-Encoding UTF8` para leer bien `bridge.log`.

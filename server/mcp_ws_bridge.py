@@ -27,7 +27,7 @@ Si una entrada no indica `port`, se le asigna uno libre a partir de 8800.
 
 Descubrimiento
 --------------
-Con --config, el puente abre además un canal de control en ws://127.0.0.1:8765 (--control-port).
+Con --config, el puente abre además un canal de control en ws://127.0.0.1:47615 (--control-port).
 Al conectarse, envía la lista de servidores configurados ({"type": "servers", "servers": […]})
 y cierra. La extensión lo usa para mostrar los MCP del PC sin escribir direcciones a mano.
 Mismas reglas de seguridad: solo 127.0.0.1 y solo orígenes de extensión.
@@ -62,7 +62,7 @@ except ImportError:  # websockets 12
 log = logging.getLogger("mcp_ws_bridge")
 
 STDIO_LIMIT = 32 * 1024 * 1024  # tamaño máximo de un mensaje JSON-RPC
-CONTROL_PORT = 8765              # canal de descubrimiento (lista de servidores configurados)
+CONTROL_PORT = 47615              # canal de descubrimiento (lista de servidores configurados)
 AUTO_PORT_START = 8800           # primer puerto para entradas sin `port`
 RELOAD_INTERVAL = 2.0            # segundos entre comprobaciones de cambios en servers.json
 ALLOWED_ORIGIN_PREFIXES = ("chrome-extension://", "moz-extension://")
@@ -317,7 +317,8 @@ async def run(configs: list[ServerConfig], config_path: Path | None = None, cont
                 control = await ws_serve(lambda ws: handle_control(ws, manager), "127.0.0.1", control_port)
                 log.info("✔ Descubrimiento disponible en ws://127.0.0.1:%d", control_port)
             except OSError as err:
-                log.error("No se pudo abrir el canal de descubrimiento (%d): %s", control_port, err)
+                log.error("No se pudo abrir el canal de descubrimiento (%d): %s. Otro programa usa ese puerto; "
+                          "los MCP funcionan, pero la extensión no podrá detectarlos.", control_port, err)
         if config_path:
             tasks.append(asyncio.create_task(_watch_config(config_path, manager)))
         await asyncio.Event().wait()  # bloquea hasta Ctrl+C
