@@ -134,3 +134,14 @@
 - Ajustes: interruptor «Recargar la extensión al llegar una versión nueva» y estado (commit, rama, última comprobación).
 - Decisión: la extensión NUNCA ejecuta comandos. El `git pull` lo hace la tarea de Windows, y la extensión solo lee un archivo.
 - Verificado en Chromium: detección de la versión nueva desde el disco y orden de recarga. NO verificable aquí: la recarga en sí, porque en Chromium automatizado `chrome.runtime.reload()` bloquea incluso una extensión mínima de control (limitación del entorno de pruebas). Tampoco se ha ejecutado PowerShell. Queda para la prueba en Windows.
+
+## 2026-11-02 — Claude (asistente de desarrollo) · Errores «ERR_CONNECTION_REFUSED» y cambio a `main`
+- Isabel ve en `chrome://extensions` un error por cada reintento de conexión a `ws://localhost:8800` (`autocad`, que el puente no tenía en marcha). Chrome registra cada WebSocket fallido como error y no se puede silenciar desde el código.
+- Solución: los MCP detectados desde el puente quedan marcados (`managed`). La extensión no abre el WebSocket si el puente no responde o no tiene ese puerto configurado; muestra el motivo en la tarjeta y reintenta en silencio.
+  - El estado del puente se consulta cada 30 s (alarma) y, cuando vuelve o aparece el MCP, se conecta al instante.
+  - Los MCP añadidos a mano por dirección no se frenan nunca.
+  - Verificado en Chromium (MCP quitado del puente → sin reintentos y con explicación).
+- `git checkout main` falló en el PC de Isabel por dos motivos:
+  1. su `main` local es el del clon original (antiguo, todavía con `server/bridge.log`);
+  2. tiene cambios locales sin confirmar en 17 archivos (origen desconocido: hay que verlos antes de decidir).
+  Recomendación: `git checkout -B main origin/main`, que conserva esos cambios porque el árbol de la rama y el de `origin/main` son idénticos, y después revisar `git status` / `git diff --stat`. La actualización automática no actúa mientras haya cambios locales.
