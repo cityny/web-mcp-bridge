@@ -3,7 +3,8 @@
 ## En curso
 
 ## Pendiente
-- [ ] Soporte HTTP nativo (Streamable HTTP) en la extensión: MCP con `"url"` en servers.json sin mcp-proxy
+- [ ] Probar AutoCAD desde DeepSeek (Isabel)
+- [ ] Soporte HTTP nativo (Streamable HTTP) en la extensión: MCP con `"url"` en servers.json sin mcp-proxy (ya no bloquea: mcp-proxy funciona)
 - [ ] Punto D (resto) — Interfaz nueva + panel lateral (side panel); decidir si se usa Impeccable
 - [ ] Cargar la extensión en Chrome y probar con `demo` en chat.deepseek.com (Isabel)
 - [ ] Punto D (resto) — Añadir/editar/quitar MCP desde el popup (escritura de servers.json vía puente, con clave y confirmación)
@@ -23,3 +24,4 @@
 - [x] Punto B — Registro de eventos y errores: background/logger.js, pestaña «Registro» con filtro, exportación JSON y borrado (2026-11-02)
 - [x] `install_service.py` detiene los puentes anteriores en Windows (instalar y desinstalar) (2026-11-02)
 - [x] Punto D (parte 2) — Editor de servers.json en la extensión (plantillas, validación, vista previa, confirmación, .bak); ID fijo de la extensión (2026-11-02)
+- [x] AutoCAD (MCP HTTP) conectado vía mcp-proxy: 16 herramientas (2026-11-02)

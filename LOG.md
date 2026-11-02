@@ -104,3 +104,7 @@
 - `pip show` de Isabel: `mcp-proxy` está en `C:\Users\…\AppData\Roaming\Python\Python314\site-packages`. `pip` lo instaló en modo usuario, porque `C:\Python314` no admite escritura sin permisos de administrador. Su `.exe` queda en `%APPDATA%\Python\Python314\Scripts`, que no está en el PATH ni en `C:\Python314\Scripts`. Por eso el puente daba `[WinError 2]` y la extensión mostraba «No se encontró o no se pudo ejecutar «mcp-proxy»» (la mejora anterior ya dio el motivo exacto).
 - Solución: `_resolve_executable` busca también en la carpeta de scripts de usuario (`sysconfig`, esquema `nt_user`).
 - Además: `ws_client.js` ya no registra un segundo «Conexión cerrada.» tras el motivo real (el handshake fallido no pisa el error de `onclose`).
+
+## 2026-11-02 — Isabel (usuaria) / Claude · AutoCAD conectado
+- Registro de Isabel: `autocad` (vía `mcp-proxy`, puerto 8800) conectado con 16 herramientas, `autocad-files` con 14. La cadena completa funciona en su PC: puente → mcp-proxy → MCP HTTP de AutoCAD.
+- Pendiente: prueba real desde DeepSeek. Con `mcp-proxy` funcionando, el soporte HTTP nativo deja de bloquear; queda como mejora (menos piezas que instalar).
