@@ -25,3 +25,7 @@
 - Decisión: el script crea `servers.json` solo con `demo`; el `default_config()` del instalador Python incluye `astrax-mcp`, que no está instalado y fallaría al conectar.
 - Decisión: el script detiene puentes anteriores (`mcp_ws_bridge.py` vía CIM) antes de arrancar; reejecutar el instalador causaba «puerto en uso» (visto en el bridge.log original). `install_service.py --uninstall` usa `taskkill` por título de ventana, que no encuentra `pythonw`: pendiente de revisar.
 - `.ps1` guardado en UTF-8 con BOM y CRLF (`.gitattributes`) para PowerShell 5.1. No se pudo ejecutar aquí (sin PowerShell): requiere prueba en Windows.
+
+## 2026-11-02 — Isabel (usuaria) / Claude · Prueba de instalación
+- `scripts/windows/install.ps1` ejecutado en Windows (usuario con espacio en la ruta): todos los pasos OK, puente escuchando en 127.0.0.1:8090.
+- Incidencia de uso: al clonar se queda en `main`, que no tiene el script. Se resolverá llevando los cambios a `main`.

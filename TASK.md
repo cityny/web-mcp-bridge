@@ -3,7 +3,7 @@
 ## En curso
 
 ## Pendiente
-- [ ] Probar `scripts/windows/install.ps1` en el PC de Isabel (Windows + Chrome) — no se pudo ejecutar en el entorno de desarrollo
+- [ ] Cargar la extensión en Chrome y probar con `demo` en chat.deepseek.com (Isabel)
 - [ ] Punto B — Registro de eventos/errores de la extensión con exportación desde el popup
 - [ ] Punto C — Actualización automática desde `main` (tarea programada `git pull` + recarga de la extensión)
 - [ ] Llevar los cambios de la rama de desarrollo a `main`
@@ -16,3 +16,4 @@
 - [x] Paso 2 — Parseo tolerante de JSON movido a `utils.js` (`WMB.extractMcpCalls`), con tests; lo usan todos los adaptadores (2026-11-02)
 - [x] Paso 3 — DeepSeek: filtro de razonamiento preciso, filtrado de anidados lineal, caché de mensajes, prueba en Chromium (2026-11-02)
 - [x] Punto A — Guía `INSTALL.md` y script `scripts/windows/install.ps1` para Windows + Chrome (2026-11-02)
+- [x] `install.ps1` probado en el PC de Isabel: Python 3.14, Git 2.54, puente activo en 8090, arranque automático registrado (2026-11-02)
