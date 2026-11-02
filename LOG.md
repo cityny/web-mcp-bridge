@@ -205,3 +205,8 @@
   - `WMB.diagnoseMcpCall(text)` detecta un intento real de llamada (`{"mcp_call":` y no la simple mención) que no se pudo leer y explica el motivo: bloque sin cerrar, JSON inválido con el mensaje del parser, falta `name` o formato incorrecto;
   - `core_bridge`: en `onDone` (respuesta terminada sin llamadas válidas) avisa en el panel, registra `call.unreadable` (con fragmento) y envía a la IA un `[MCP_RESULT status="error"]` con el motivo y cómo corregirlo. Una sola vez por bloque.
 - Pruebas: `test_utils` (6 casos de diagnóstico) y `test_freno.mjs` (Chromium: un JSON roto no ejecuta nada y escribe el aviso en el chat).
+
+## 2026-11-02 — Claude (asistente de desarrollo) · Hipótesis descartada: llamadas idénticas en conversaciones largas
+- Hipótesis: en conversaciones largas, DeepSeek descarga los mensajes antiguos y la «huella» de una llamada nueva idéntica a una ya ejecutada coincide (conversación + nº de llamadas iguales en la página), así que se descartaría en silencio. Reproducida en el DOM simulado.
+- Probado un rediseño por turnos (envío del usuario o del resultado = turno nuevo). Falla en un caso: si DeepSeek descarga mensajes y a la vez responde de golpe con un texto idéntico, no se distingue de un repintado del mensaje viejo sin conocer cómo marca DeepSeek los mensajes del usuario.
+- Decisión: NO publicarlo. El registro real de Isabel mostraba otra causa (`resumen_entidades` bloqueando el MCP, corregido en mis-mcp PR #5) y un cambio especulativo podría volver a ejecutar órdenes dos veces. Pendiente: capturar el HTML real de una conversación larga de DeepSeek antes de tocar la deduplicación.
