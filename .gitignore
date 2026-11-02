@@ -8,3 +8,4 @@ servers.json
 *.log
 update-stamp.json
 scripts/windows/*.vbs
+server/servers.json.bak
