@@ -1,0 +1,63 @@
+// Freno de seguridad (Chromium + DOM simulado de DeepSeek): un MCP en «Permitir siempre» que falla 3 veces
+// seguidas deja de ejecutarse solo y pide confirmación. Uso: node tests/browser/test_freno.mjs
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
+let chromium;
+try { ({ chromium } = require('playwright')); } catch { console.log('⚠ test_freno: Playwright no está instalado, prueba omitida.'); process.exit(0); }
+
+const root = new URL('../../', import.meta.url);
+const files = ['utils.js', 'prompt_builder.js', 'ui_widget.js', 'adapters/base_adapter.js', 'adapters/deepseek.js', 'core_bridge.js']
+  .map((f) => readFileSync(new URL(`content_scripts/${f}`, root), 'utf8'));
+
+// API de la extensión simulada: un MCP «autocad» en Permitir siempre cuya herramienta siempre falla.
+const FAKE_CHROME = `
+  const attach = Element.prototype.attachShadow; // solo en la prueba: Shadow DOM abierto para poder leer el panel
+  Element.prototype.attachShadow = function (o) { return attach.call(this, { ...o, mode: 'open' }); };
+  window.calls = [];
+  window.chrome = { runtime: { id: 'test', onMessage: { addListener() {} }, sendMessage: async (m) => {
+    if (m.type === 'GET_STATE') return { ok: true, settings: { bridgeEnabled: true, autoSend: false, autoInject: false, reminder: false, toolTimeoutSec: 30, maxResultChars: 12000 },
+      servers: [{ id: 's1', name: 'autocad', slug: 'autocad', url: 'http://x', enabled: true, permission: 'allow' }] };
+    if (m.type === 'GET_ACTIVE_TOOLS') return { ok: true, tools: [{ server: 'autocad', serverLabel: 'autocad', name: 'lisp', description: '', inputSchema: { type: 'object', properties: {} } }] };
+    if (m.type === 'CALL_TOOL') { window.calls.push(m.arguments.n); return { ok: false, error: 'AutoCAD está ocupado' }; }
+    if (m.type === 'SLEEP') { await new Promise((r) => setTimeout(r, m.ms)); return { ok: true }; }
+    return { ok: true };
+  } } };`;
+
+const browser = await chromium.launch();
+try {
+  const page = await browser.newPage();
+  await page.route('https://chat.deepseek.com/**', (route) => route.fulfill({ contentType: 'text/html', body: '<!doctype html><body><div id="chat"></div><textarea id="chat-input"></textarea></body>' }));
+  await page.goto('https://chat.deepseek.com/a/chat/s/freno');
+  await page.addScriptTag({ content: FAKE_CHROME });
+  for (const code of files) await page.addScriptTag({ content: code });
+  await page.waitForTimeout(3200); // fin de la línea base
+
+  const responder = (n) => page.evaluate((n) => {
+    const div = document.createElement('div');
+    div.innerHTML = `<div class="ds-markdown">{"mcp_call":{"server":"autocad","name":"lisp","arguments":{"n":${n}}}}</div>`;
+    document.getElementById('chat').appendChild(div);
+  }, n);
+  const tarjeta = () => page.evaluate(() => {
+    const host = [...document.querySelectorAll('*')].find((e) => e.shadowRoot);
+    return host?.shadowRoot.querySelector('.card')?.innerText ?? null;
+  });
+
+  for (let n = 1; n <= 3; n += 1) {
+    await responder(n);
+    await page.waitForTimeout(4000);
+  }
+  assert.deepEqual(await page.evaluate(() => window.calls), [1, 2, 3], 'las 3 primeras se ejecutan solas (Permitir siempre)');
+  assert.equal(await tarjeta(), null, 'sin tarjeta de aprobación hasta ahora');
+
+  await responder(4);
+  await page.waitForTimeout(4000);
+  const texto = await tarjeta();
+  assert.ok(texto && /Freno de seguridad/.test(texto) && /3 veces seguidas/.test(texto), `debe pedir confirmación: ${texto}`);
+  assert.deepEqual(await page.evaluate(() => window.calls), [1, 2, 3], 'la 4.ª no se ejecuta sin confirmar');
+  console.log('✔ test_freno: todo correcto');
+} finally {
+  await browser.close();
+}

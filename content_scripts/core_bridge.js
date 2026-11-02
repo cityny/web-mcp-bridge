@@ -34,6 +34,16 @@
 
   const state = { servers: [], tools: [], settings: { autoSend: true, maxResultChars: 12000 }, forceFull: false };
   let queue = Promise.resolve();
+
+  /**
+   * Freno de seguridad: aunque un MCP esté en «Permitir siempre», se vuelve a preguntar si
+   *   · ese MCP ha fallado FAILS_LIMIT veces seguidas (programa ocupado, colgado, LISP roto…), o
+   *   · la IA repite exactamente la misma llamada REPEAT_LIMIT veces seguidas (bucle).
+   * Así una IA no puede atascar un programa insistiendo en bucle.
+   */
+  const FAILS_LIMIT = 3;
+  const REPEAT_LIMIT = 3;
+  const brake = { fails: {}, lastSig: '', repeats: 0 };
   let lastRefreshError = '';
 
   // Best-effort: un Web Lock abierto reduce que el navegador «congele» la pestaña en segundo plano.
@@ -194,8 +204,17 @@
       result = { status: 'error', text: `La herramienta «${call.name}» no existe en «${srv.slug}». Disponibles: ${available || 'ninguna'}.` };
     } else {
       let approved = true;
-      if (srv.permission === 'ask') {
-        const answer = await widget.requestApproval({ server: srv.slug, name: call.name, arguments: call.arguments });
+      const sig = `${srv.slug}|${call.name}|${JSON.stringify(call.arguments ?? {})}`;
+      brake.repeats = sig === brake.lastSig ? brake.repeats + 1 : 1;
+      brake.lastSig = sig;
+      const fails = brake.fails[srv.slug] ?? 0;
+      let reason = null;
+      if (fails >= FAILS_LIMIT) reason = `«${srv.slug}» ha fallado ${fails} veces seguidas. Comprueba que el programa no esté ocupado o colgado antes de seguir.`;
+      else if (brake.repeats >= REPEAT_LIMIT) reason = `La IA repite la misma llamada por ${brake.repeats}.ª vez seguida (posible bucle).`;
+      if (reason) audit('warn', 'call.brake', { server: srv.slug, tool: call.name, fails, repeats: brake.repeats });
+
+      if (srv.permission === 'ask' || reason) {
+        const answer = await widget.requestApproval({ server: srv.slug, name: call.name, arguments: call.arguments, reason });
         approved = Boolean(answer);
         audit('info', 'call.approval', { server: srv.slug, tool: call.name, answer: answer || 'reject' });
         if (answer === 'always') {
@@ -205,7 +224,12 @@
       } // 'allow': se ejecuta siempre, sin preguntar nunca
 
       if (!approved) {
-        result = { status: 'rejected', text: 'El usuario rechazó la ejecución de esta herramienta.' };
+        result = {
+          status: 'rejected',
+          text: reason
+            ? `El usuario detuvo las llamadas automáticas: ${reason} No vuelvas a intentarlo; explica qué pasó y espera sus instrucciones.`
+            : 'El usuario rechazó la ejecución de esta herramienta.',
+        };
         widget.log('err', `Rechazada: ${srv.slug} › ${call.name}`);
       } else {
         widget.log('ok', `Ejecutando ${srv.slug} › ${call.name}…`);
@@ -218,6 +242,7 @@
         }
         if (!response?.ok) result = { status: 'error', text: response?.error ?? 'Error desconocido.' };
         else result = { status: response.result?.isError ? 'error' : 'ok', raw: response.result };
+        brake.fails[srv.slug] = result.status === 'ok' ? 0 : fails + 1;
         widget.log(result.status === 'ok' ? 'ok' : 'err', `${call.name}: ${result.status}`);
       }
     }
