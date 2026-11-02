@@ -53,6 +53,14 @@ assert.equal(calls[0].arguments.ruta, 'D:\\x\\y');
 // JSON correcto: la reparación no altera nada
 assert.equal(WMB.repairJsonBackslashes('{"a":"C:\\\\Users"}'), '{"a":"C:\\\\Users"}');
 
+// 8c) Diagnóstico de llamadas ilegibles (antes se ignoraban en silencio)
+assert.equal(WMB.diagnoseMcpCall('Hola, el formato mcp_call sirve para herramientas.'), null, 'mencionar la palabra no es un intento');
+assert.equal(WMB.diagnoseMcpCall('{"mcp_call":{"server":"a","name":"b","arguments":{}}}'), null, 'una llamada válida no es un problema');
+assert.match(WMB.diagnoseMcpCall('{"mcp_call":{"server":"autocad","name":"lisp","arguments":{"expresion":"(progn (setq a 1)"}'), /no está cerrado/);
+assert.match(WMB.diagnoseMcpCall('{"mcp_call":{"server":"autocad","name":"lisp","arguments":{"expresion":"(ssget "_X")"}}}'), /JSON inválido/);
+assert.match(WMB.diagnoseMcpCall('{"mcp_call":{"server":"autocad","arguments":{}}}'), /falta «name»/);
+assert.match(WMB.diagnoseMcpCall('```json\n{ "mcp_call": "estado" }\n```'), /debe ser un objeto/);
+
 // 9) Imágenes: NUNCA se omiten, viajan como archivo adjunto (caso real de astrax_ver_pantalla)
 const shot = { content: [{ type: 'image', data: 'QUJD', mimeType: 'image/jpeg' }] };
 let plan = WMB.planResult(shot, { server: 'astrax_mcp', name: 'astrax_ver_pantalla', status: 'ok' });
