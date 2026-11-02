@@ -189,3 +189,12 @@
   - la detección solo se registra cuando aparece un MCP nuevo;
   - `bridge.config_saved` muestra la URL de los MCP HTTP en vez de `undefined`.
 - Propuesta para el MCP de AutoCAD (repo aparte, pendiente de subir): herramientas específicas con límites (contar o seleccionar por capa/tipo, borrar con confirmación, cancelar comando activo) en vez de depender de LISP libre.
+
+## 2026-11-02 — Claude (asistente de desarrollo) · Freno de seguridad contra bucles
+- Petición de Isabel: evitar que la IA colapse AutoCAD con órdenes repetidas o en bucle.
+- Extensión (`core_bridge.js`): aunque el MCP esté en «Permitir siempre», se vuelve a pedir confirmación si
+  - el MCP falló 3 veces seguidas (se reinicia al primer éxito), o
+  - la IA repite exactamente la misma llamada 3 veces seguidas.
+  La tarjeta de aprobación muestra «Freno de seguridad» y el motivo. Si el usuario rechaza, el resultado le pide a la IA que no lo reintente y espere instrucciones. Evento de registro `call.brake`.
+- Complementa la protección del MCP de AutoCAD (`mis-mcp` PR #4): ocupado, límites, lotes, pausa y continuar, y MCPSEL.
+- Prueba: `tests/browser/test_freno.mjs` (Chromium + DeepSeek simulado; 3 fallos se ejecutan solos y la 4.ª llamada queda en espera con el aviso).
