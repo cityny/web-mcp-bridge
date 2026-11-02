@@ -79,8 +79,14 @@ function renderServers(state) {
       : server.enabled
         ? `${server.url} · ${STATUS_TEXT[server.status]}${server.status === 'connected' ? ` · ${server.toolCount} herramientas` : ''}`
         : server.url;
-    if (server.enabled && server.error && server.status !== 'connected') meta.title = server.error;
     info.append(name, meta);
+    if (server.enabled && server.error && server.status !== 'connected') {
+      meta.title = server.error;
+      const why = document.createElement('div');
+      why.className = 'meta error-detail';
+      why.textContent = server.error;
+      info.append(why);
+    }
 
     info.append(permSelect(server.permission, (value) => api('SET_PERMISSION', { id: server.id, permission: value }), `Permiso de ${server.name}`));
 

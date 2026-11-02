@@ -107,8 +107,28 @@ def _token_ok(path: str, cfg: ServerConfig) -> bool:
     return hmac.compare_digest(supplied, cfg.token)
 
 
+def _resolve_executable(command: str) -> str:
+    """Encuentra el ejecutable: PATH (resuelve npx.cmd en Windows) y, si no, la carpeta de scripts del Python
+    que ejecuta el puente (p. ej. C:\\Python314\\Scripts\\mcp-proxy.exe aunque esa carpeta no esté en el PATH)."""
+    found = shutil.which(command)
+    if found:
+        return found
+    base = Path(sys.executable).parent
+    for folder in (base / "Scripts", base, base.parent / "Scripts"):
+        found = shutil.which(command, path=str(folder))
+        if found:
+            return found
+    return command
+
+
+def _close_reason(text: str) -> str:
+    """Motivo de cierre de WebSocket: máximo 123 bytes UTF-8."""
+    data = text.encode("utf-8")[:120]
+    return data.decode("utf-8", errors="ignore")
+
+
 async def _spawn(cfg: ServerConfig) -> asyncio.subprocess.Process:
-    executable = shutil.which(cfg.command[0]) or cfg.command[0]  # resuelve npx.cmd en Windows
+    executable = _resolve_executable(cfg.command[0])
     extra = {"creationflags": 0x08000000} if sys.platform == "win32" else {}  # CREATE_NO_WINDOW
     return await asyncio.create_subprocess_exec(
         executable,
@@ -177,13 +197,17 @@ async def _ws_to_stdin(proc: asyncio.subprocess.Process, ws) -> None:
         await proc.stdin.drain()
 
 
-async def _log_stderr(proc: asyncio.subprocess.Process, name: str) -> None:
+async def _log_stderr(proc: asyncio.subprocess.Process, name: str, tail: list[str] | None = None) -> None:
     assert proc.stderr is not None
     while True:
         line = await proc.stderr.readline()
         if not line:
             return
-        log.info("[%s] %s", name, line.decode("utf-8", errors="replace").rstrip())
+        text = line.decode("utf-8", errors="replace").rstrip()
+        log.info("[%s] %s", name, text)
+        if tail is not None and text.strip():
+            tail.append(text.strip())
+            del tail[:-5]
 
 
 # ───────────────────────── Servidor ─────────────────────────
@@ -203,19 +227,32 @@ async def handle_client(ws, cfg: ServerConfig) -> None:
 
     try:
         proc = await _spawn(cfg)
-    except (FileNotFoundError, PermissionError) as err:
+    except (FileNotFoundError, PermissionError, OSError) as err:
         log.error("[%s] No se pudo ejecutar %s: %s", cfg.name, cfg.command, err)
-        await ws.close(1011, "No se pudo iniciar el servidor MCP")
+        await ws.close(1011, _close_reason(f"No se encontró o no se pudo ejecutar «{cfg.command[0]}»"))
         return
 
     log.info("[%s] Cliente conectado → pid %s", cfg.name, proc.pid)
-    pipes = {
-        asyncio.create_task(_stdout_to_ws(proc, ws)),
-        asyncio.create_task(_ws_to_stdin(proc, ws)),
-    }
-    stderr_task = asyncio.create_task(_log_stderr(proc, cfg.name))
+    stdout_task = asyncio.create_task(_stdout_to_ws(proc, ws))
+    pipes = {stdout_task, asyncio.create_task(_ws_to_stdin(proc, ws))}
+    stderr_tail: list[str] = []
+    stderr_task = asyncio.create_task(_log_stderr(proc, cfg.name, stderr_tail))
     try:
-        await asyncio.wait(pipes, return_when=asyncio.FIRST_COMPLETED)
+        done, _ = await asyncio.wait(pipes, return_when=asyncio.FIRST_COMPLETED)
+        # El MCP terminó por su cuenta (stdout cerrado): se cierra el WebSocket explicando por qué.
+        if stdout_task in done:
+            try:
+                await asyncio.wait_for(proc.wait(), 2)
+            except asyncio.TimeoutError:
+                pass
+        if stdout_task in done and proc.returncode is not None:
+            await asyncio.sleep(0.2)  # últimas líneas de stderr
+            detail = stderr_tail[-1] if stderr_tail else "sin mensaje de error"
+            log.warning("[%s] El MCP terminó (código %s): %s", cfg.name, proc.returncode, detail)
+            try:
+                await ws.close(1011, _close_reason(f"El MCP terminó (código {proc.returncode}): {detail}"))
+            except Exception:  # noqa: BLE001
+                pass
     finally:
         for task in (*pipes, stderr_task):
             task.cancel()

@@ -90,3 +90,12 @@
   - el puente informa del último error de `servers.json` (`config_error` en el canal de control) y el popup lo muestra como aviso;
   - el log del puente nombra los MCP al guardar y deja de escribir «connection open» en cada consulta (logger `websockets` en WARNING).
 - Pruebas: Chromium (plantilla sin añadir → pregunta → guardado con `autocad`; JSON roto → aviso en el popup) y `test_bridge_config` (`config_error` se informa y se limpia).
+
+## 2026-11-02 — Claude (asistente de desarrollo) · `autocad` se cae al activarlo
+- Registro de Isabel: `autocad` se añadió bien (puerto 8800 automático), pero al activarlo la conexión se cierra al instante («Conexión cerrada.») sin más detalle. El `ERR_CONNECTION_REFUSED` en el 8792 fue pasajero: el puente se reiniciaba y la extensión reconectó a los 8 s.
+- Causa probable: el puente no encuentra `mcp-proxy`, porque `pip` lo instala en `C:\Python314\Scripts`, que puede no estar en el PATH, o el proxy termina con error.
+- Cambios:
+  - el puente busca el ejecutable también en la carpeta `Scripts` del Python que lo ejecuta;
+  - si el comando no existe o el MCP termina al arrancar, cierra el WebSocket con el motivo (código de salida + última línea de stderr);
+  - `ws_client.js` guarda ese motivo como `lastError`, y el popup muestra el error bajo el MCP (antes solo como tooltip).
+- Prueba nueva `tests/test_bridge_errors.py` (comando inexistente y MCP que termina con código 3).

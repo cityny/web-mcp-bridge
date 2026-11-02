@@ -138,3 +138,4 @@ select[data-perm="deny"] { border-color: var(--err); }
 .discover button { width: 100%; }
 .log-actions { display: flex; gap: 6px; align-items: center; }
 .log-list small { word-break: break-word; }
+.error-detail { color: var(--err); word-break: break-word; }
