@@ -45,7 +45,7 @@ export function normalize(data) {
       return { name, ...entry };
     });
   }
-  const used = new Set(entries.filter((e) => e.port != null).map((e) => Number(e.port)));
+  const used = new Set(entries.filter((e) => e.port != null && !e.url).map((e) => Number(e.port)));
   let next = AUTO_PORT_START;
   const names = new Set();
   const out = entries.map((e) => {
@@ -53,6 +53,10 @@ export function normalize(data) {
     if (!name) throw new Error('Cada MCP necesita un nombre.');
     if (names.has(name)) throw new Error(`Nombre repetido: «${name}».`);
     names.add(name);
+    if (e.url && !e.command) { // MCP por HTTP: la extensión se conecta directa; el puente no arranca nada
+      if (!/^https?:\/\//i.test(String(e.url))) throw new Error(`«${name}»: la url debe empezar por http:// o https://`);
+      return { name, port: null, auto: false, http: true, command: [String(e.url)] };
+    }
     let command = typeof e.command === 'string' ? [e.command] : Array.isArray(e.command) ? [...e.command] : [];
     command = command.concat((e.args ?? []).map(String));
     if (!command.length) throw new Error(`«${name}» no tiene "command".`);
@@ -63,7 +67,7 @@ export function normalize(data) {
     if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error(`«${name}»: el puerto no es válido.`);
     return { name, port, auto, command };
   });
-  const ports = out.map((e) => e.port);
+  const ports = out.filter((e) => !e.http).map((e) => e.port);
   const dup = ports.filter((p, i) => ports.indexOf(p) !== i);
   if (dup.length) throw new Error(`Puertos repetidos: ${[...new Set(dup)].join(', ')}.`);
   return out;
@@ -125,7 +129,7 @@ function validate() {
     const before = originalByName.get(e.name);
     const changed = !before || before !== commandLine(e.command);
     if (changed) tr.className = 'changed';
-    const cells = [e.name, e.auto ? `${e.port} (auto)` : String(e.port), commandLine(e.command), changed ? (before ? 'modificado' : 'nuevo') : ''];
+    const cells = [e.name, e.http ? 'HTTP' : (e.auto ? `${e.port} (auto)` : String(e.port)), e.http ? `conexión directa a ${e.command[0]}` : commandLine(e.command), changed ? (before ? 'modificado' : 'nuevo') : ''];
     cells.forEach((value, i) => {
       const td = document.createElement('td');
       if (i === 3 && value) { const tag = document.createElement('span'); tag.className = 'tag'; tag.textContent = value; td.append(tag); } else td.textContent = value;
@@ -169,7 +173,7 @@ async function save() {
   const changed = entries.filter((e) => originalByName.get(e.name) !== commandLine(e.command));
   const removed = [...originalByName.keys()].filter((name) => !entries.some((e) => e.name === name));
   const lines = [
-    ...changed.map((e) => `• ${e.name} (puerto ${e.port}): ${commandLine(e.command)}`),
+    ...changed.map((e) => (e.http ? `• ${e.name}: conexión directa a ${e.command[0]} (no ejecuta nada en tu PC)` : `• ${e.name} (puerto ${e.port}): ${commandLine(e.command)}`)),
     ...removed.map((name) => `• ${name}: se elimina`),
   ];
   if (lines.length && !confirm(`Se guardarán estos cambios y tu PC podrá ejecutar estos comandos cuando actives el MCP:\n\n${lines.join('\n')}\n\n¿Continuar?`)) return;
@@ -210,14 +214,14 @@ function buildTemplate() {
   } else if (type === 'http') {
     const url = $('#tpl-url').value.trim();
     if (!/^https?:\/\//.test(url)) throw new Error('La dirección debe empezar por http:// o https://');
-    entry = { command: 'mcp-proxy', args: ['--transport=streamablehttp', url] };
+    entry = { url }; // conexión directa desde la extensión (sin mcp-proxy)
   } else {
     const command = slash($('#tpl-command').value);
     if (!command) throw new Error('Indica el comando.');
     entry = { command, args: $('#tpl-args').value.split('\n').map((a) => a.trim()).filter(Boolean) };
   }
   const port = $('#tpl-port').value.trim();
-  if (port) entry.port = Number(port);
+  if (port && !entry.url) entry.port = Number(port);
   return { name, entry };
 }
 
@@ -234,7 +238,7 @@ function addTemplate() {
     const data = parsed.data;
     if (Array.isArray(data?.servers)) {
       if (data.servers.some((s) => s.name === name)) throw new Error(`Ya existe «${name}».`);
-      data.servers.push({ name, ...entry, command: [entry.command, ...entry.args], args: undefined });
+      data.servers.push(entry.url ? { name, ...entry } : { name, ...entry, command: [entry.command, ...entry.args], args: undefined });
     } else {
       const target = data.mcpServers ?? data;
       if (name in target) throw new Error(`Ya existe «${name}».`);

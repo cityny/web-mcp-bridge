@@ -23,6 +23,7 @@ Formatos de servers.json admitidos
     {"servers": [{"name": "demo", "port": 8090, "command": ["python", "demo.py"]}]}
     {"mcpServers": {"archivos": {"command": "npx", "args": ["-y", "…"], "port": 8091}}}   # estilo Claude Desktop
     {"archivos": {"command": "npx", "args": ["-y", "…"], "port": 8091}}
+    {"autocad": {"url": "http://127.0.0.1:8765/mcp"}}   # MCP por HTTP: no se arranca, solo se anuncia
 Si una entrada no indica `port`, se le asigna uno libre a partir de 8800.
 
 Descubrimiento
@@ -85,6 +86,7 @@ class ServerConfig:
     env: dict[str, str] = field(default_factory=dict)
     token: str | None = None
     allowed_origins: tuple[str, ...] = ALLOWED_ORIGIN_PREFIXES
+    url: str | None = None  # MCP por HTTP: el puente NO lo arranca, solo lo anuncia (la extensión se conecta directa)
 
 
 # ───────────────────────── Utilidades ─────────────────────────
@@ -289,19 +291,23 @@ class BridgeManager:
 
     def __init__(self, config_path: Path | None = None, owner_origin: str | None = None) -> None:
         self.active: dict[str, tuple[ServerConfig, object]] = {}
+        self.remote: dict[str, ServerConfig] = {}  # MCP por HTTP (solo se anuncian)
         self.config_path = config_path
         self.owner_origin = owner_origin
         self.write_lock = asyncio.Lock()
         self.config_error: str | None = None  # último error al leer servers.json (se muestra en la extensión)
 
     def listing(self) -> list[dict]:
-        return [
-            {"name": cfg.name, "port": cfg.port, "url": f"ws://localhost:{cfg.port}"}
-            for cfg, _ in self.active.values()
-        ]
+        local = [{"name": cfg.name, "port": cfg.port, "url": f"ws://localhost:{cfg.port}", "transport": "ws"}
+                 for cfg, _ in self.active.values()]
+        remote = [{"name": cfg.name, "url": cfg.url, "transport": "http"} for cfg in self.remote.values()]
+        return local + remote
 
     async def apply(self, configs: list[ServerConfig]) -> None:
-        wanted = {cfg.name: cfg for cfg in configs}
+        self.remote = {cfg.name: cfg for cfg in configs if cfg.url}
+        for cfg in self.remote.values():
+            log.info("✔ «%s» (HTTP) anunciado: la extensión se conecta directamente a %s", cfg.name, cfg.url)
+        wanted = {cfg.name: cfg for cfg in configs if not cfg.url}
         for name in list(self.active):
             cfg, server = self.active[name]
             if wanted.get(name) != cfg:  # eliminado o modificado → se cierra (y se reabre abajo si sigue)
@@ -480,7 +486,7 @@ def _entries(data) -> list[dict]:
 def load_config(path: Path) -> list[ServerConfig]:
     data = json.loads(path.read_text(encoding="utf-8-sig"))
     entries = _entries(data)
-    used = {int(e["port"]) for e in entries if e.get("port") is not None}
+    used = {int(e["port"]) for e in entries if e.get("port") is not None and not e.get("url")}
     next_port = AUTO_PORT_START
     configs, names = [], set()
     for entry in entries:
@@ -490,6 +496,12 @@ def load_config(path: Path) -> list[ServerConfig]:
         if name in names:
             raise ValueError(f"nombre repetido: «{name}»")
         names.add(name)
+        if entry.get("url") and not entry.get("command"):
+            url = str(entry["url"]).strip()
+            if not url.startswith(("http://", "https://")):
+                raise ValueError(f"«{name}»: la url debe empezar por http:// o https://")
+            configs.append(ServerConfig(name=name, command=[], port=0, url=url))
+            continue
         command = entry.get("command")
         command = [command] if isinstance(command, str) else list(command or [])
         command += [str(a) for a in entry.get("args", [])]
@@ -511,7 +523,7 @@ def load_config(path: Path) -> list[ServerConfig]:
                 token=entry.get("token"),
             )
         )
-    ports = [c.port for c in configs]
+    ports = [c.port for c in configs if not c.url]
     if len(ports) != len(set(ports)):
         raise ValueError(f"hay puertos repetidos: {sorted(p for p in set(ports) if ports.count(p) > 1)}")
     return configs

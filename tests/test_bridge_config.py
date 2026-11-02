@@ -37,6 +37,16 @@ def test_formats(tmp: Path) -> None:
     write(cfg, {"mcpServers": {"a": {"command": "x"}, "b": {"command": "y", "port": 8800}}})
     a, b = load_config(cfg)
     assert (a.port, b.port) == (8801, 8800)
+    # MCP por HTTP: no lleva comando ni puerto (no se arranca), y no choca con los puertos automáticos
+    write(cfg, {"autocad": {"url": "http://127.0.0.1:8765/mcp"}, "x": {"command": "x"}})
+    a, x = load_config(cfg)
+    assert (a.url, a.command, x.port) == ("http://127.0.0.1:8765/mcp", [], 8800)
+    write(cfg, {"autocad": {"url": "ftp://x"}})
+    try:
+        load_config(cfg)
+        raise AssertionError("una url que no es http debe fallar")
+    except ValueError:
+        pass
     # Errores claros
     for bad in ([1, 2], {"a": {"port": 1}}, {"a": {"command": "x", "port": 9}, "b": {"command": "y", "port": 9}}):
         write(cfg, bad)
@@ -127,6 +137,14 @@ async def test_live(cfg: Path) -> None:
     await asyncio.sleep(3)
     msg = await discover()
     assert len(msg["servers"]) == 2 and msg["config_error"], msg
+
+    # Un MCP HTTP se anuncia en el listado (sin arrancar nada)
+    write(cfg, {"demo": {"command": PY, "args": [DEMO], "port": 18890}, "demo2": {"command": PY, "args": [DEMO], "port": 18891},
+                "autocad": {"url": "http://127.0.0.1:8765/mcp"}})
+
+    async def has_http():
+        return any(s.get("transport") == "http" and s["url"] == "http://127.0.0.1:8765/mcp" for s in (await discover())["servers"])
+    assert await wait_for(has_http), "el MCP HTTP no aparece en el listado"
 
     # Quitar un servidor lo detiene
     write(cfg, {"demo": {"command": PY, "args": [DEMO], "port": 18890}})

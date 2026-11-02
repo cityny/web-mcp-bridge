@@ -58,7 +58,7 @@ El popup detecta los MCP configurados en `server/servers.json` (canal de descubr
 6. Registro de eventos y errores (pestaña «Registro», exportación JSON).
 7. Editor de MCP dentro de la extensión, interfaz nueva (MCP / Actividad / Ajustes) y panel lateral.
 8. Actualización automática desde `main` (tarea programada + recarga de la extensión).
-9. AutoCAD conectado: MCP HTTP en `127.0.0.1:8765/mcp` vía `mcp-proxy` (Python), 16 herramientas.
+9. AutoCAD conectado: MCP HTTP en `127.0.0.1:8765/mcp`, 16 herramientas. Primero vía `mcp-proxy`; desde el soporte HTTP nativo, la extensión se conecta directa con `{"url": …}` en servers.json.
 5. Descubrimiento de MCP desde el popup, recarga en caliente de `servers.json` y formatos `{nombre: {command, args, port}}` / `mcpServers`.
 
 ## Objetivos
