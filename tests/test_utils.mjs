@@ -37,6 +37,22 @@ assert.notEqual(WMB.hash('x'), WMB.hash('y'));
 assert.equal(WMB.extractMcpCalls('{“mcp_call”:{“server”:“s”,“name”:“t”,“arguments”:{“a”:1}}}').length, 1);
 assert.deepEqual({ ...WMB.extractMcpCalls('{"mcp_call":{"name":"t","arguments":"{\\"a\\":1}"}}')[0].arguments }, { a: 1 });
 
+// 8b) Barras invertidas sueltas: el Markdown del chat se come el escape (C:\\Users → C:\Users)
+calls = WMB.extractMcpCalls('{"mcp_call":{"server":"fs","name":"leer","arguments":{"ruta":"C:\\Users\\Ana\\doc.txt"}}}');
+assert.equal(calls.length, 1, 'ruta de Windows con barras sueltas');
+assert.equal(calls[0].arguments.ruta, 'C:\\Users\\Ana\\doc.txt');
+// Barra suelta fuera de ruta de Windows: se conservan los escapes válidos y se duplica la inválida
+calls = WMB.extractMcpCalls('{"mcp_call":{"name":"t","arguments":{"re":"a\\d+","q":"di \\"hola\\""}}}');
+assert.equal(calls.length, 1);
+assert.equal(calls[0].arguments.re, 'a\\d+');
+assert.equal(calls[0].arguments.q, 'di "hola"');
+// Comillas tipográficas + barras sueltas a la vez
+calls = WMB.extractMcpCalls('```json\n{“mcp_call”:{“server”:“fs”,“name”:“leer”,“arguments”:{“ruta”:“D:\\x\\y”}}}\n```');
+assert.equal(calls.length, 1);
+assert.equal(calls[0].arguments.ruta, 'D:\\x\\y');
+// JSON correcto: la reparación no altera nada
+assert.equal(WMB.repairJsonBackslashes('{"a":"C:\\\\Users"}'), '{"a":"C:\\\\Users"}');
+
 // 9) Imágenes: NUNCA se omiten, viajan como archivo adjunto (caso real de astrax_ver_pantalla)
 const shot = { content: [{ type: 'image', data: 'QUJD', mimeType: 'image/jpeg' }] };
 let plan = WMB.planResult(shot, { server: 'astrax_mcp', name: 'astrax_ver_pantalla', status: 'ok' });

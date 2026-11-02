@@ -111,6 +111,41 @@
     return -1;
   }
 
+  /** Arregla barras invertidas sueltas dentro de UN string JSON (contenido sin comillas). */
+  function fixString(raw) {
+    // Ruta de Windows (C:\...): todas las barras son separadores literales.
+    if (/^[A-Za-z]:\\/.test(raw)) return raw.replace(/\\+/g, '\\\\');
+    // Resto: duplica solo las barras que no forman un escape JSON válido.
+    return raw.replace(/\\(["\\/bfnrt]|u[0-9a-fA-F]{4})|\\/g, (m, valid) => (valid ? m : '\\\\'));
+  }
+
+  /**
+   * Repara barras invertidas que el Markdown del chat dejó sueltas dentro de los strings de un JSON
+   * (p. ej. la IA escribe `C:\\Users` y el chat lo muestra como `C:\Users` → JSON inválido).
+   */
+  function repairBackslashes(text) {
+    let out = '';
+    let i = 0;
+    while (i < text.length) {
+      if (text[i] !== '"') { out += text[i]; i += 1; continue; }
+      let j = i + 1;
+      let raw = '';
+      while (j < text.length && text[j] !== '"') {
+        if (text[j] === '\\' && j + 1 < text.length) { raw += text[j] + text[j + 1]; j += 2; }
+        else { raw += text[j]; j += 1; }
+      }
+      out += `"${fixString(raw)}"`;
+      i = j + 1;
+    }
+    return out;
+  }
+
+  /** JSON.parse tolerante: si falla, reintenta con las barras invertidas reparadas. */
+  function parseLenient(json) {
+    try { return JSON.parse(json); } catch { /* se intenta reparar */ }
+    return JSON.parse(repairBackslashes(json));
+  }
+
   function scanCalls(text) {
     const calls = [];
     const marker = '"mcp_call"';
@@ -124,7 +159,7 @@
       const end = findBalancedEnd(text, start);
       if (end === -1) continue;
       try {
-        const call = JSON.parse(text.slice(start, end + 1))?.mcp_call;
+        const call = parseLenient(text.slice(start, end + 1))?.mcp_call;
         if (call && typeof call.name === 'string' && call.name) {
           let args = call.arguments;
           if (typeof args === 'string') { try { args = JSON.parse(args); } catch { args = {}; } } // algunos modelos serializan los argumentos
@@ -142,7 +177,8 @@
 
   /**
    * Extrae del texto de un mensaje todas las llamadas `{"mcp_call": {...}}` válidas.
-   * Tolera bloques de código, texto alrededor, espacios no estándar y comillas tipográficas.
+   * Tolera bloques de código, texto alrededor, espacios no estándar, comillas tipográficas y
+   * barras invertidas sueltas (rutas de Windows que el Markdown del chat dejó sin escapar).
    * @returns {{server:string|null,name:string,arguments:object}[]}
    */
   WMB.extractMcpCalls = (rawText) => {
@@ -152,6 +188,9 @@
     // Último recurso: algunos renderizadores convierten las comillas rectas en tipográficas (“ ”).
     return scanCalls(raw.replace(/[“”„‟″]/g, '"'));
   };
+
+  /** Expuesto para tests y adaptadores. */
+  WMB.repairJsonBackslashes = repairBackslashes;
 
   // ───────────────────────── Resultados MCP (sin omitir nada) ─────────────────────────
 
