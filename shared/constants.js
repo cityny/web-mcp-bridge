@@ -42,6 +42,8 @@ export const DEFAULT_SETTINGS = {
   focusFallback: true,
   /** Al pulsar el icono de la extensión se abre el panel lateral en lugar de la ventana emergente. */
   preferSidePanel: false,
+  /** Recargar la extensión sola cuando la tarea de actualización baja una versión nueva (update-stamp.json). */
+  autoUpdate: true,
 };
 
 /** El servidor de prueba incluido en el repositorio (server/examples/demo_mcp_server.py). */

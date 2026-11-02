@@ -79,6 +79,27 @@ Más detalles:
 - **Seguridad:** solo esta extensión (ID fijo `kpjokcdpjbiljllmdobofmomhifebbbo`) puede leer o cambiar la configuración. Otras extensiones y las webs no pueden.
 - **Formatos admitidos:** `{"nombre": {"command", "args", "port"}}`, `{"mcpServers": {...}}` (estilo Claude Desktop) y `{"servers": [...]}`. Sin `port` se asigna uno libre desde 8800.
 
+## Actualización automática
+
+`install.ps1` registra la tarea programada **WebMCPBridge-Update**. Cada 10 minutos, sin abrir ventanas:
+
+1. Si la carpeta está en la rama `main` y no tiene cambios locales, baja la versión nueva (`git pull --ff-only`). Nunca sobrescribe trabajo tuyo.
+2. Si cambió el puente (`server/`), lo reinicia.
+3. Escribe `update-stamp.json`. La extensión lo lee cada minuto y, si hay versión nueva, **se recarga sola**. Nunca lo hace en mitad de una llamada a una herramienta.
+4. Después de una recarga, las pestañas de chat abiertas muestran «La extensión se actualizó: recarga la pestaña». Pulsa F5 en ellas.
+
+- **Requisito:** la carpeta debe estar en `main` (`git checkout main`). En otra rama la tarea no hace nada y lo indica en *Ajustes → Actualizaciones*.
+- **Estado y log:** el estado aparece en *Ajustes → Actualizaciones* y el historial en `server\update.log`.
+- **Actualizar a mano:**
+
+  ```powershell
+  powershell -ExecutionPolicy Bypass -File scripts\windows\update.ps1
+  ```
+
+- **Desactivar:**
+  - la recarga de la extensión: interruptor en *Ajustes*;
+  - la tarea programada: `install.ps1 -NoAutoUpdate`, o `Unregister-ScheduledTask -TaskName WebMCPBridge-Update -Confirm:$false`.
+
 ## Problemas frecuentes
 
 | Síntoma | Qué mirar |
@@ -93,6 +114,10 @@ Más detalles:
 
 ```powershell
 py -3 server\install_service.py --uninstall
+```
+
+```powershell
+Unregister-ScheduledTask -TaskName WebMCPBridge-Update -Confirm:$false
 ```
 
 Después quita la extensión en `chrome://extensions`.

@@ -7,7 +7,7 @@
  *   3. Exponer a popup y content scripts una API de mensajes (ver `handleMessage`).
  */
 import { McpConnection } from './ws_client.js';
-import { log, getLogs, clearLogs } from './logger.js';
+import { log, getLogs, clearLogs, flushLogs } from './logger.js';
 import {
   STORAGE_KEYS as KEYS, DEFAULT_SETTINGS, MAX_ACTIVE_SERVERS,
   CALL_TIMEOUT_MS, HISTORY_LIMIT, SUPPORTED_URL_PATTERNS, PERMISSIONS,
@@ -154,6 +154,7 @@ async function getSnapshot() {
     ok: true,
     settings,
     bridge: bridgeStatus,
+    update: { ...update },
     max: MAX_ACTIVE_SERVERS,
     servers: servers.map((s) => {
       const conn = connections.get(s.id);
@@ -202,7 +203,15 @@ async function addHistory(entry) {
   });
 }
 
-async function callTool({ server, name, arguments: args }) {
+/** Llamadas a herramientas en curso: la extensión nunca se recarga en medio de una. */
+let inFlight = 0;
+
+async function callTool(msg) {
+  inFlight += 1;
+  try { return await callToolInner(msg); } finally { inFlight -= 1; }
+}
+
+async function callToolInner({ server, name, arguments: args }) {
   const { servers, settings } = await loadState();
   if (!settings.bridgeEnabled) return { ok: false, error: 'El bridge está desactivado.' };
   const slugs = assignSlugs(servers);
@@ -446,6 +455,7 @@ async function handleMessage(msg, sender) {
       log('info', 'bridge.config_saved', { servers: res.servers?.map((s) => `${s.name}:${s.port}`) });
       return { ok: true, servers: res.servers };
     }
+    case 'CHECK_UPDATE': return { ok: true, update: await checkUpdate() };
     case 'OPEN_EDITOR':
       await chrome.tabs.create({ url: chrome.runtime.getURL('editor/editor.html') });
       return { ok: true };
@@ -470,7 +480,7 @@ async function handleMessage(msg, sender) {
 const sourceOf = (sender) => (sender?.tab && !String(sender.url ?? '').startsWith('chrome-extension://') ? 'content' : 'popup');
 
 /** Mensajes que NO se registran (frecuentes o de solo lectura). */
-const QUIET = new Set(['SLEEP', 'GET_STATE', 'GET_ACTIVE_TOOLS', 'GET_HISTORY', 'GET_LOGS', 'CLEAR_LOGS', 'LOG', 'CALL_TOOL', 'GET_BRIDGE_CONFIG', 'OPEN_EDITOR', 'FOCUS_TAB', 'RESTORE_FOCUS']);
+const QUIET = new Set(['CHECK_UPDATE', 'SLEEP', 'GET_STATE', 'GET_ACTIVE_TOOLS', 'GET_HISTORY', 'GET_LOGS', 'CLEAR_LOGS', 'LOG', 'CALL_TOOL', 'GET_BRIDGE_CONFIG', 'OPEN_EDITOR', 'FOCUS_TAB', 'RESTORE_FOCUS']);
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   handleMessage(msg, sender)
@@ -502,11 +512,58 @@ chrome.runtime.onInstalled.addListener(async () => {
   await reconcile();
 });
 
-// Red de seguridad: si el SW se duerme, la alarma lo despierta y reconecta.
+// ───────────────────────── Actualización automática ─────────────────────────
+// La tarea programada (scripts/windows/update.ps1) baja la versión nueva de main y escribe update-stamp.json.
+// La extensión, cargada desde esa carpeta, lee el sello: si el commit cambió desde que arrancó, se recarga sola.
+
+const update = { bootCommit: null, commit: null, branch: null, status: null, checkedAt: null, pendingReload: false };
+
+async function readStamp() {
+  try {
+    const res = await fetch(chrome.runtime.getURL('update-stamp.json'), { cache: 'no-store' });
+    return res.ok ? await res.json() : null;
+  } catch { return null; } // sin sello: la actualización automática no está instalada
+}
+
+/**
+ * Commit con el que se CARGÓ la extensión. Se guarda en storage.session: sobrevive a que Chrome duerma y despierte el
+ * service worker (si no, una versión llegada mientras dormía se tomaría como «la de arranque» y nunca se recargaría),
+ * y se borra al recargar la extensión o reiniciar el navegador.
+ */
+async function bootCommit(current) {
+  const area = chrome.storage.session;
+  if (!area) return current;
+  const saved = (await area.get('wmb_boot_commit')).wmb_boot_commit;
+  if (saved) return saved;
+  if (current) await area.set({ wmb_boot_commit: current });
+  return current;
+}
+
+async function checkUpdate() {
+  const stamp = await readStamp();
+  if (stamp) {
+    Object.assign(update, { commit: stamp.commit ?? null, branch: stamp.branch ?? null, status: stamp.status ?? null, checkedAt: stamp.checkedAt ?? null });
+    if (!update.bootCommit) update.bootCommit = await bootCommit(stamp.commit ?? null);
+  }
+  const { settings } = await loadState();
+  const changed = Boolean(update.bootCommit && update.commit && update.commit !== update.bootCommit);
+  update.pendingReload = changed;
+  if (changed && settings.autoUpdate !== false && inFlight === 0) {
+    log('info', 'update.reload', { from: update.bootCommit.slice(0, 7), to: update.commit.slice(0, 7) });
+    await flushLogs();
+    setTimeout(() => chrome.runtime.reload(), 300);
+  }
+  return { ...update };
+}
+
+// Red de seguridad: si el SW se duerme, la alarma lo despierta y reconecta. Cada minuto, además, se mira si hay versión nueva.
 chrome.alarms.create('wmb-keepalive', { periodInMinutes: 0.5 });
+chrome.alarms.create('wmb-update', { periodInMinutes: 1 });
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === 'wmb-keepalive') reconcile().catch((err) => log('error', 'reconcile', { error: err.message }));
+  if (alarm.name === 'wmb-update') checkUpdate().catch(() => {});
 });
+checkUpdate().catch(() => {});
 
 log('info', 'sw.start', { version: chrome.runtime.getManifest?.().version });
 reconcile().catch((err) => { console.error('[WMB] reconcile', err); log('error', 'reconcile', { error: err.message }); });

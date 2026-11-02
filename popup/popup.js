@@ -273,8 +273,20 @@ function renderSettings(settings) {
   $('#master-label').textContent = settings.bridgeEnabled ? 'Bridge activado' : 'Bridge desactivado: no se conecta ni se inyecta nada';
   $('#main').classList.toggle('off', !settings.bridgeEnabled);
   for (const key of ['autoInject', 'autoSend', 'reminder', 'focusFallback', 'preferSidePanel']) $(`#set-${key}`).checked = Boolean(settings[key]);
+  $('#set-autoUpdate').checked = settings.autoUpdate !== false;
   if (document.activeElement?.id !== 'set-maxResultChars') $('#set-maxResultChars').value = settings.maxResultChars;
   if (document.activeElement?.id !== 'set-reinjectEvery') $('#set-reinjectEvery').value = settings.reinjectEvery;
+}
+
+function renderUpdate(update) {
+  const out = $('#update-status');
+  if (!update?.commit) {
+    out.textContent = 'No instalada: ejecuta scripts\\windows\\install.ps1 para registrar la tarea que baja las versiones nuevas de main.';
+    return;
+  }
+  const when = update.checkedAt ? ` · comprobado ${ago(Date.parse(update.checkedAt))}` : '';
+  const pending = update.pendingReload ? ' · versión nueva lista: se recargará al terminar la llamada en curso' : '';
+  out.textContent = `Versión ${update.commit.slice(0, 7)} (rama ${update.branch})${when}. ${update.status ?? ''}${pending}`;
 }
 
 // ───────────────────────── Pestañas y refresco ─────────────────────────
@@ -301,6 +313,7 @@ async function refresh(force = false) {
     renderServers(state);
     renderGlobalPermission(state.servers);
     renderSettings(state.settings);
+    renderUpdate(state.update);
     if (currentTab === 'activity') {
       if (activityView === 'calls') await renderHistory();
       else await renderLogs();
@@ -342,7 +355,7 @@ $('#add-form').addEventListener('submit', async (event) => {
 });
 $('#perm-all').addEventListener('change', guard((e) => api('SET_ALL_PERMISSIONS', { permission: e.target.value })));
 $('#master').addEventListener('change', guard((e) => api('UPDATE_SETTINGS', { settings: { bridgeEnabled: e.target.checked } })));
-for (const key of ['autoInject', 'autoSend', 'reminder', 'focusFallback', 'preferSidePanel']) {
+for (const key of ['autoInject', 'autoSend', 'reminder', 'focusFallback', 'preferSidePanel', 'autoUpdate']) {
   $(`#set-${key}`).addEventListener('change', guard((e) => api('UPDATE_SETTINGS', { settings: { [key]: e.target.checked } })));
 }
 $('#set-reinjectEvery').addEventListener('change', guard((e) => {

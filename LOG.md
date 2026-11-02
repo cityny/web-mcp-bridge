@@ -120,3 +120,17 @@
 - El icono muestra el nº de MCP conectados.
 - El registro usa el nombre del MCP además del ID.
 - Resultados MCP: `structuredContent` de FastMCP (`{"result": "<mismo texto>"}`) ya no se duplica en el chat (el resultado de `estado` de AutoCAD llegaba dos veces y gastaba el doble de tokens).
+
+## 2026-11-02 — Claude (asistente de desarrollo) · Punto C: actualización automática
+- `scripts/windows/update.ps1`:
+  - solo actúa en `main` y sin cambios locales; hace `git fetch` + `merge --ff-only` (nunca sobrescribe trabajo local);
+  - reinicia el puente si cambió `server/`;
+  - escribe `update-stamp.json` (commit, rama, estado; ignorado por git) y anota en `server/update.log` (recortado a 500 líneas).
+- `install.ps1` registra la tarea programada `WebMCPBridge-Update` (cada 10 min, `wscript` + `.vbs` para no abrir ventanas) y ejecuta una primera comprobación. Opción `-NoAutoUpdate`.
+- Extensión:
+  - alarma cada minuto que lee `update-stamp.json` del propio directorio de la extensión (en las descomprimidas se lee del disco, verificado en Chromium);
+  - si el commit difiere del de arranque y no hay llamadas en curso, ejecuta `chrome.runtime.reload()`;
+  - la versión de arranque se guarda en `storage.session`, para que una versión llegada con el service worker dormido también provoque la recarga.
+- Ajustes: interruptor «Recargar la extensión al llegar una versión nueva» y estado (commit, rama, última comprobación).
+- Decisión: la extensión NUNCA ejecuta comandos. El `git pull` lo hace la tarea de Windows, y la extensión solo lee un archivo.
+- Verificado en Chromium: detección de la versión nueva desde el disco y orden de recarga. NO verificable aquí: la recarga en sí, porque en Chromium automatizado `chrome.runtime.reload()` bloquea incluso una extensión mínima de control (limitación del entorno de pruebas). Tampoco se ha ejecutado PowerShell. Queda para la prueba en Windows.

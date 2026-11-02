@@ -6,3 +6,5 @@ __pycache__/
 servers.json
 .venv/
 *.log
+update-stamp.json
+scripts/windows/*.vbs
