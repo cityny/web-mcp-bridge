@@ -43,6 +43,11 @@
     matches(hostname) {
       return hostname === 'claude.ai';
     }
+
+    /** Claude Code (claude.ai/code) no es un chat: allí la extensión nunca actúa. */
+    excludesPath(pathname) {
+      return pathname.startsWith('/code');
+    }
   }
 
   WMB.registerAdapter(new ClaudeAdapter());

@@ -19,6 +19,7 @@
   if (!WMB || WMB.started) return;
   const adapter = WMB.findAdapter(location.hostname);
   if (!adapter) return;
+  if (adapter.excludesPath?.(location.pathname)) return; // p. ej. Claude Code: no es un chat
   WMB.started = true;
 
   const INJECT_KEY = 'wmb:injected-signature';
@@ -104,6 +105,8 @@
     state.servers = snapshot.servers.filter((s) => s.enabled && s.url);
     state.tools = active.tools;
     adapter.configure({ focusFallback: state.settings.focusFallback !== false });
+    const host = document.getElementById('wmb-host');
+    if (host) host.style.display = platformOn() ? '' : 'none'; // plataforma desactivada: ni panel ni acciones
     widget.update({
       adapterName: adapter.name,
       servers: state.servers,
@@ -115,6 +118,11 @@
   }
 
   const resetTurns = () => sessionStorage.setItem(TURNS_KEY, '0');
+
+  /** ¿El usuario quiere que la extensión actúe en esta plataforma? (Ajustes → Plataformas) */
+  function platformOn() {
+    return state.settings.platforms?.[adapter.id] !== false;
+  }
 
   async function injectInstructions() {
     await refresh();
@@ -145,7 +153,17 @@
    */
   async function deliver(srv, call, { status, text, raw }) {
     const { autoSend, maxResultChars, reminder } = state.settings;
-    const plan = WMB.planResult(raw ?? { content: [{ type: 'text', text }] }, { server: srv.slug, name: call.name, status, maxChars: maxResultChars });
+    let result = raw ?? { content: [{ type: 'text', text }] };
+    // Plataformas que no aprovechan imágenes (DeepSeek solo extrae texto de ellas): adjuntar una captura no aporta
+    // nada y la subida puede atascar el envío del resultado. Se sustituye por una nota para la IA.
+    if (adapter.acceptsImages === false && Array.isArray(result.content) && result.content.some((c) => c?.type === 'image')) {
+      const nota = `[Imagen no adjuntada: ${adapter.name} no puede ver imágenes de forma útil, así que la captura no se envía. `
+        + 'Para entender el dibujo usa herramientas que devuelvan datos (entidades, capas, coordenadas, medidas).]';
+      result = { ...result, content: result.content.map((c) => (c?.type === 'image' ? { type: 'text', text: nota } : c)) };
+      widget.log('ok', `Captura no adjuntada: ${adapter.name} no ve imágenes (se envía una nota en su lugar).`);
+      audit('info', 'result.image_skipped', { server: srv.slug, tool: call.name, platform: adapter.id });
+    }
+    const plan = WMB.planResult(result, { server: srv.slug, name: call.name, status, maxChars: maxResultChars });
 
     let attached = true;
     if (plan.files.length) {
@@ -186,6 +204,7 @@
   /** Procesa una llamada MCP detectada en la respuesta de la IA. */
   async function handleCall({ call }) {
     if (!state.settings.bridgeEnabled) return; // bridge apagado: se ignoran las llamadas
+    if (!platformOn()) return; // plataforma desactivada por el usuario
     audit('info', 'call.detected', { server: call.server, tool: call.name, args: JSON.stringify(call.arguments ?? {}) });
     const { srv, tool } = await resolveCall(call);
 
@@ -302,7 +321,7 @@
    * Solo actúa con eventos reales del usuario (isTrusted), nunca con los que genera la extensión.
    */
   function interceptSend(event) {
-    if (!event.isTrusted || injecting) return;
+    if (!event.isTrusted || injecting || !platformOn()) return;
     adapter.markActivity(); // el usuario envía algo: la respuesta que llegue es NUEVA (no historial)
     const { bridgeEnabled, autoInject, reminder, reinjectEvery } = state.settings;
     if (!bridgeEnabled || !state.tools.length) return;
@@ -378,6 +397,7 @@
       {
         onDone: ({ text, element }) => {
           // La IA intentó llamar a una herramienta pero el bloque no se puede leer: antes se ignoraba en silencio.
+          if (!platformOn()) return;
           const problem = state.settings.bridgeEnabled && state.tools.length ? WMB.diagnoseMcpCall(text) : null;
           if (problem) {
             queue = queue.then(() => reportUnreadableCall(text, element));

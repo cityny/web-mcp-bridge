@@ -31,7 +31,7 @@ const withLock = (fn) => {
 async function loadState() {
   const data = await chrome.storage.local.get([KEYS.servers, KEYS.settings]);
   const stored = data[KEYS.settings] ?? {};
-  const settings = { ...DEFAULT_SETTINGS, ...stored };
+  const settings = { ...DEFAULT_SETTINGS, ...stored, platforms: { ...DEFAULT_SETTINGS.platforms, ...(stored.platforms ?? {}) } };
   // Migración desde 1.0: «ejecutar sin preguntar» (autoExecute) pasa a ser el permiso «allow».
   if (!PERMISSIONS.includes(stored.defaultPermission)) settings.defaultPermission = stored.autoExecute ? 'allow' : 'ask';
   const servers = (data[KEYS.servers] ?? []).filter((s) => s.url).map((s) => ({ // sin dirección = marcador de la 1.1: se descarta
@@ -165,15 +165,26 @@ async function getSnapshot() {
         slug: slugs.get(s.id),
         status: conn?.status ?? 'disconnected',
         error: conn?.lastError ?? null,
-        toolCount: conn?.tools.length ?? 0,
-        tools: (conn?.tools ?? []).map((t) => ({ name: t.name, description: String(t.description ?? '').replace(/\s+/g, ' ').slice(0, 180) })),
-        approxTokens: conn ? Math.ceil(JSON.stringify(conn.tools).length / 4) : 0,
+        toolCount: enabledTools(s, conn).length,
+        totalTools: conn?.tools.length ?? 0,
+        tools: (conn?.tools ?? []).map((t) => ({
+          name: t.name,
+          description: String(t.description ?? '').replace(/\s+/g, ' ').slice(0, 180),
+          enabled: !(s.disabledTools ?? []).includes(t.name),
+        })),
+        approxTokens: conn ? Math.ceil(JSON.stringify(enabledTools(s, conn)).length / 4) : 0,
       };
     }),
   };
 }
 
 /** Herramientas de los servidores ACTIVOS (esto es lo que se inyecta al chat). */
+/** Herramientas de un MCP que el usuario deja ver a la IA (las desactivadas no se describen ni se ejecutan). */
+function enabledTools(server, conn) {
+  const off = new Set(server.disabledTools ?? []);
+  return (conn?.tools ?? []).filter((t) => !off.has(t.name));
+}
+
 async function getActiveTools() {
   await reconcile();
   const { servers, settings } = await loadState();
@@ -184,7 +195,7 @@ async function getActiveTools() {
 
   const tools = [];
   for (const s of active) {
-    for (const t of connections.get(s.id)?.tools ?? []) {
+    for (const t of enabledTools(s, connections.get(s.id))) {
       tools.push({
         server: slugs.get(s.id),
         serverLabel: s.name,
@@ -236,6 +247,7 @@ async function callToolInner({ server, name, arguments: args }) {
   if (conn && conn.status !== 'connected') conn.connect(); // sin esperar al backoff: reconecta ya
   if (!conn || !(await conn.whenReady(10_000))) return fail(`El servidor «${label}» no está conectado.`);
   if (!conn.tools.some((t) => t.name === name)) return fail(`La herramienta «${name}» no existe en «${label}».`);
+  if ((target.disabledTools ?? []).includes(name)) return fail(`La herramienta «${name}» está desactivada por el usuario en «${label}».`);
 
   const started = Date.now();
   try {
@@ -469,6 +481,19 @@ const mutations = {
     if (added.length || changed) await saveServers(servers);
     if (added.length) log('info', 'servers.discovered', { added }); // solo se registra cuando aparece algo nuevo
     return { ok: true, found: found.length, added, configError: listing.config_error ?? null };
+  }),
+
+  /** Activa o desactiva herramientas de un MCP: `names` (lista) o todas si se omite. */
+  SET_TOOLS_ENABLED: ({ id, names, enabled }) => mutate(async (servers) => {
+    const server = servers.find((s) => s.id === id);
+    if (!server) throw new Error('Servidor no encontrado.');
+    const all = (connections.get(id)?.tools ?? []).map((t) => t.name);
+    const target = Array.isArray(names) ? names : all;
+    const off = new Set(server.disabledTools ?? []);
+    for (const n of target) { if (enabled) off.delete(n); else off.add(n); }
+    server.disabledTools = [...off];
+    await saveServers(servers);
+    return { ok: true, disabled: server.disabledTools.length };
   }),
 
   UPDATE_SETTINGS: ({ settings: patch }) => mutate(async (_servers, settings) => {

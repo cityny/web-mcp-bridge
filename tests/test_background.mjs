@@ -110,6 +110,36 @@ assert.deepEqual(focus.prev, { tabId: 7, windowId: 70 });
 await call({ type: 'RESTORE_FOCUS', prev: focus.prev });
 assert.deepEqual(focusLog, [['tab', 3, true], ['win', 30, true], ['tab', 7, true], ['win', 70, true]]);
 
+// 8b) Herramientas desactivadas por el usuario: la IA no las ve ni puede ejecutarlas
+await call({ type: 'UPDATE_SETTINGS', settings: { bridgeEnabled: true } });
+await call({ type: 'ADD_SERVER', name: 'herramientas', url: 'ws://localhost:9911' });
+state = await call({ type: 'GET_STATE' });
+const nuevo = state.servers.find((s) => s.name === 'herramientas');
+for (const s of state.servers) if (s.enabled && s.id !== nuevo.id) await call({ type: 'TOGGLE_SERVER', id: s.id, enabled: false });
+await call({ type: 'TOGGLE_SERVER', id: nuevo.id, enabled: true });
+await call({ type: 'SET_PERMISSION', id: nuevo.id, permission: 'allow' });
+await call({ type: 'GET_ACTIVE_TOOLS' }); // conecta y espera las herramientas
+state = await call({ type: 'GET_STATE' });
+const conTools = state.servers.find((s) => s.id === nuevo.id);
+assert.ok(conTools.toolCount > 0, 'hay un MCP conectado con herramientas');
+const nombre = conTools.tools[0].name;
+assert.equal((await call({ type: 'SET_TOOLS_ENABLED', id: conTools.id, names: [nombre], enabled: false })).ok, true);
+state = await call({ type: 'GET_STATE' });
+const tras = state.servers.find((s) => s.id === conTools.id);
+assert.equal(tras.tools.find((t) => t.name === nombre).enabled, false);
+assert.equal(tras.toolCount, tras.totalTools - 1);
+assert.ok(!(await call({ type: 'GET_ACTIVE_TOOLS' })).tools.some((t) => t.name === nombre), 'la IA no la ve');
+const bloqueada = await call({ type: 'CALL_TOOL', server: tras.slug, name: nombre, arguments: {} });
+assert.equal(bloqueada.ok, false);
+assert.match(bloqueada.error, /desactivada por el usuario/);
+await call({ type: 'SET_TOOLS_ENABLED', id: conTools.id, enabled: true }); // todas de nuevo
+assert.ok((await call({ type: 'GET_ACTIVE_TOOLS' })).tools.some((t) => t.name === nombre));
+
+// 8c) Plataformas: una configuración antigua sin `platforms` se completa con todas activas
+assert.deepEqual(state.settings.platforms, { chatgpt: true, gemini: true, claude: true, deepseek: true });
+await call({ type: 'UPDATE_SETTINGS', settings: { platforms: { ...state.settings.platforms, gemini: false } } });
+assert.equal((await call({ type: 'GET_STATE' })).settings.platforms.gemini, false);
+
 // 9) Registro de eventos: llamadas, cambios de configuración y eventos del chat; recorte de textos y borrado
 let logs = (await call({ type: 'GET_LOGS' })).logs;
 const events = new Set(logs.map((l) => l.event));

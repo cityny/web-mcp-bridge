@@ -206,3 +206,13 @@ input[type="text"], input[type="number"] {
 }
 #toast.show { opacity: 1; transform: none; }
 @media (prefers-reduced-motion: reduce) { *, *::before { transition: none !important; } }
+.tools-box { border-top: 1px solid var(--line); padding: 8px 12px 10px; }
+.tools-search { margin-bottom: 6px; }
+.tools-bar { display: flex; justify-content: space-between; align-items: center; gap: 6px; margin-bottom: 6px; font-size: 12px; flex-wrap: wrap; }
+.tools-box .tools { padding: 0; border-top: 0; }
+.tool-row { display: flex; gap: 8px; align-items: flex-start; cursor: pointer; }
+.tool-row input { margin-top: 2px; accent-color: var(--accent); flex: none; }
+.tools li.off b { color: var(--muted); text-decoration: line-through; }
+.platforms { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin: 6px 0 4px; }
+.platform { display: flex; gap: 8px; align-items: center; padding: 7px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); cursor: pointer; }
+.platform input { accent-color: var(--accent); }

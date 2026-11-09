@@ -68,6 +68,8 @@
     #lock = null;                                // { hash, firedAt, sentAt, newGen }
     #grow = { el: null, len: 0, at: 0 };         // seguimiento del crecimiento del último mensaje
     #messages = { at: 0, list: [] };             // caché corta de getAssistantMessages()
+    /** DeepSeek web solo extrae texto de las imágenes: las capturas de herramientas no se adjuntan. */
+    acceptsImages = false;
 
     constructor() {
       super({
