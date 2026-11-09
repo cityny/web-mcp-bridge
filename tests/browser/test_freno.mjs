@@ -89,6 +89,25 @@ try {
   assert.match(aviso, /No se pudo leer tu bloque mcp_call: JSON inválido/, `debe avisar a la IA: ${aviso}`);
   assert.equal(await page2.evaluate(() => window.calls.length), 1, 'el bloque roto no ejecuta nada');
 
+  // Captura de pantalla en DeepSeek: no se adjunta (no aporta y puede atascar el envío); va una nota de texto
+  const page3 = await browser.newPage();
+  await page3.route('https://chat.deepseek.com/**', (route) => route.fulfill({ contentType: 'text/html', body: '<!doctype html><body><div id="chat"></div><textarea id="chat-input"></textarea></body>' }));
+  await page3.goto('https://chat.deepseek.com/a/chat/s/captura');
+  await page3.addScriptTag({ content: FAKE_CHROME.replace("window.calls.push(m.arguments.n); return { ok: false, error: 'AutoCAD está ocupado' };",
+    "window.calls.push(m.arguments.n); return { ok: true, result: { content: [{ type: 'text', text: 'Captura tomada' }, { type: 'image', data: 'iVBORw0KGgo=', mimeType: 'image/png' }] } };") });
+  for (const code of files) await page3.addScriptTag({ content: code });
+  await page3.waitForTimeout(3200);
+  await page3.evaluate(() => {
+    const div = document.createElement('div');
+    div.innerHTML = '<div class="ds-markdown">{"mcp_call":{"server":"autocad","name":"lisp","arguments":{"n":7}}}</div>';
+    document.getElementById('chat').appendChild(div);
+  });
+  await page3.waitForTimeout(5000);
+  const enviado = await page3.inputValue('#chat-input');
+  assert.match(enviado, /Captura tomada/);
+  assert.match(enviado, /Imagen no adjuntada: DeepSeek/);
+  assert.doesNotMatch(enviado, /imagen adjunta/i);
+
   console.log('✔ test_freno: todo correcto');
 } finally {
   await browser.close();

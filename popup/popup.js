@@ -6,7 +6,7 @@
  *   - Actividad: llamadas a herramientas y registro de eventos (filtrar, exportar, borrar).
  *   - Ajustes:   interfaz (panel lateral) y comportamiento en el chat.
  */
-import { MAX_ACTIVE_SERVERS, RECOMMENDED_ACTIVE_SERVERS, PERMISSIONS, PERMISSION_LABELS, DEMO_SERVER } from '../shared/constants.js';
+import { MAX_ACTIVE_SERVERS, RECOMMENDED_ACTIVE_SERVERS, PERMISSIONS, PERMISSION_LABELS, DEMO_SERVER, PLATFORM_LABELS } from '../shared/constants.js';
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const STATUS_TEXT = {
@@ -184,8 +184,10 @@ function renderServer(server, activeCount) {
   const tools = server.tools ?? [];
   if (tools.length) {
     const expanded = openTools.has(server.id);
+    const on = tools.filter((t) => t.enabled !== false).length;
+    const label = on === tools.length ? `${tools.length} herramientas` : `${on} de ${tools.length} herramientas`;
     const btn = el('button', { type: 'button', class: 'tools-toggle', 'aria-expanded': String(expanded) },
-      icon('chevron', 'icon chev'), `${tools.length} herramientas`);
+      icon('chevron', 'icon chev'), label);
     btn.addEventListener('click', () => {
       if (openTools.has(server.id)) openTools.delete(server.id); else openTools.add(server.id);
       refresh(true);
@@ -195,10 +197,43 @@ function renderServer(server, activeCount) {
   foot.append(permSelect(server.permission, (value) => api('SET_PERMISSION', { id: server.id, permission: value }), `Permiso de ${server.name}`));
   li.append(foot);
 
-  if (tools.length && openTools.has(server.id)) {
-    li.append(el('ul', { class: 'tools' }, ...tools.map((t) => el('li', {}, el('b', { text: t.name }), t.description ? el('span', { text: t.description }) : null))));
-  }
+  if (tools.length && openTools.has(server.id)) li.append(renderTools(server, tools));
   return li;
+}
+
+// ───────────────────────── Herramientas de cada MCP (cuáles ve la IA) ─────────────────────────
+
+const toolFilter = new Map(); // id del MCP → texto del buscador
+let focusFilter = null;       // MCP cuyo buscador tenía el foco (se restaura tras redibujar)
+
+function renderTools(server, tools) {
+  const box = el('div', { class: 'tools-box' });
+  const on = tools.filter((t) => t.enabled !== false).length;
+  const filter = toolFilter.get(server.id) ?? '';
+  const search = el('input', {
+    type: 'text', class: 'tools-search', placeholder: `Buscar entre ${tools.length} herramientas…`,
+    'aria-label': `Buscar herramientas de ${server.name}`, 'data-filter': server.id,
+  });
+  search.value = filter;
+  search.addEventListener('input', () => { toolFilter.set(server.id, search.value); focusFilter = server.id; refresh(true); });
+  const setAll = (enabled, names) => guard(() => api('SET_TOOLS_ENABLED', { id: server.id, enabled, names }));
+  const q = filter.trim().toLowerCase();
+  const shown = q ? tools.filter((t) => t.name.toLowerCase().includes(q) || (t.description ?? '').toLowerCase().includes(q)) : tools;
+  const bar = el('div', { class: 'tools-bar' },
+    el('span', { class: 'muted', text: `${on} de ${tools.length} activas · la IA solo ve las activas` }),
+    el('span', { class: 'row-gap' },
+      el('button', { type: 'button', class: 'ghost small', onclick: setAll(true, q ? shown.map((t) => t.name) : undefined) }, q ? 'Activar estas' : 'Todas'),
+      el('button', { type: 'button', class: 'ghost small', onclick: setAll(false, q ? shown.map((t) => t.name) : undefined) }, q ? 'Desactivar estas' : 'Ninguna')));
+  const list = el('ul', { class: 'tools' }, ...shown.map((t) => {
+    const check = el('input', { type: 'checkbox', 'aria-label': `Permitir ${t.name}` });
+    check.checked = t.enabled !== false;
+    check.addEventListener('change', guard(() => api('SET_TOOLS_ENABLED', { id: server.id, names: [t.name], enabled: check.checked })));
+    return el('li', { class: t.enabled === false ? 'off' : '' },
+      el('label', { class: 'tool-row' }, check, el('span', {}, el('b', { text: t.name }), t.description ? el('span', { text: t.description }) : null)));
+  }));
+  if (!shown.length) list.append(el('li', { class: 'muted', text: 'Ninguna coincide con la búsqueda.' }));
+  box.append(search, bar, list);
+  return box;
 }
 
 function renderServers(state) {
@@ -214,6 +249,10 @@ function renderServers(state) {
   $('#empty').hidden = state.servers.length > 0;
 
   $('#server-list').replaceChildren(...state.servers.map((s) => renderServer(s, active.length)));
+  if (focusFilter) { // el buscador de herramientas conserva el foco y el cursor al redibujar
+    const input = document.querySelector(`input[data-filter="${focusFilter}"]`);
+    if (input) { input.focus(); input.setSelectionRange(input.value.length, input.value.length); }
+  }
 }
 
 function renderGlobalPermission(servers) {
@@ -274,6 +313,10 @@ function renderSettings(settings) {
   $('#main').classList.toggle('off', !settings.bridgeEnabled);
   for (const key of ['autoInject', 'autoSend', 'reminder', 'focusFallback', 'preferSidePanel']) $(`#set-${key}`).checked = Boolean(settings[key]);
   $('#set-autoUpdate').checked = settings.autoUpdate !== false;
+  for (const [id] of Object.entries(PLATFORM_LABELS)) {
+    const box = $(`#plat-${id}`);
+    if (box) box.checked = settings.platforms?.[id] !== false;
+  }
   if (document.activeElement?.id !== 'set-maxResultChars') $('#set-maxResultChars').value = settings.maxResultChars;
   if (document.activeElement?.id !== 'set-reinjectEvery') $('#set-reinjectEvery').value = settings.reinjectEvery;
   if (document.activeElement?.id !== 'set-toolTimeoutSec') $('#set-toolTimeoutSec').value = settings.toolTimeoutSec ?? 300;
@@ -304,6 +347,7 @@ function setTab(tab) {
 
 let selectFocusedAt = 0;
 document.addEventListener('focusin', (e) => { if (e.target.matches?.('select')) selectFocusedAt = Date.now(); });
+document.addEventListener('focusout', (e) => { if (e.target.matches?.('.tools-search')) setTimeout(() => { if (!document.activeElement?.matches?.('.tools-search')) focusFilter = null; }, 0); });
 
 async function refresh(force = false) {
   if (!force && document.activeElement?.matches('input[type="text"], input[type="number"]')) return; // escribiendo
@@ -384,6 +428,16 @@ $('#export-logs').addEventListener('click', guard(async () => {
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 5000);
   toast(`Exportados ${logs.length} eventos.`);
+}));
+
+// Plataformas: casillas generadas a partir de PLATFORM_LABELS
+$('#platforms').replaceChildren(...Object.entries(PLATFORM_LABELS).map(([id, name]) => {
+  const box = el('input', { type: 'checkbox', id: `plat-${id}` });
+  box.addEventListener('change', guard(async () => {
+    const { settings } = await api('GET_STATE');
+    await api('UPDATE_SETTINGS', { settings: { platforms: { ...settings.platforms, [id]: box.checked } } });
+  }));
+  return el('label', { class: 'platform' }, box, el('span', { text: name }));
 }));
 
 // ───────────────────────── Inicio ─────────────────────────

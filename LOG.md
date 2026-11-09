@@ -214,3 +214,15 @@
 - Registro de Isabel (20:25:40): aviso «bloque JSON no cerrado» y, 4 s después, la misma llamada completa detectada y ejecutada. DeepSeek hizo una pausa a mitad del bloque, el observador lo dio por terminado y el aviso se escribió en el chat a destiempo.
 - Solución: antes de avisar se espera 8 s y se comprueba que el mensaje no haya cambiado, que no se esté generando y que siga siendo ilegible.
 - Prueba (`test_freno.mjs`): bloque a medio escribir que se completa 4 s después → sin aviso y ejecutado; bloque roto de verdad → aviso a los ~8 s.
+
+## 2026-11-09 — Claude (asistente de desarrollo) · Plataformas, herramientas por MCP y capturas en DeepSeek
+- Registro de Isabel con el MCP nuevo «AutoCAD MCP Pro» (http://127.0.0.1:8766/mcp, **243 herramientas**). Las 31 llamadas terminaron bien (la mayoría en menos de 1 s; `_X` tardó 32 s esperando selección en AutoCAD). El MCP y la extensión respondieron siempre.
+- Causas de los «se queda sin responder»:
+  1. 243 herramientas descritas a DeepSeek: decenas de miles de tokens; DeepSeek se satura.
+  2. `view_screenshot`: la extensión adjuntaba la captura y DeepSeek (que solo extrae texto de las imágenes) no siempre seguía.
+- Riesgo detectado: la extensión estaba activa a la vez en DeepSeek, Gemini y en Claude Code (claude.ai/code, la propia sesión de desarrollo).
+- Cambios:
+  - **Plataformas** (Ajustes): casillas por IA (`settings.platforms`). En las desactivadas, el panel se oculta y no se inyecta ni se ejecuta nada. Claude Code (`/code`) se excluye siempre (`excludesPath` del adaptador de Claude).
+  - **Herramientas por MCP**: casillas, buscador y «Todas/Ninguna» (o «Activar/Desactivar estas» con filtro). `server.disabledTools`: no se describen a la IA, no cuentan en los tokens y `CALL_TOOL` las rechaza. Mutación `SET_TOOLS_ENABLED`.
+  - **Capturas en DeepSeek**: `acceptsImages = false` en el adaptador. Las imágenes del resultado se sustituyen por una nota que orienta a la IA a herramientas de datos (evento `result.image_skipped`). El resto de plataformas sigue adjuntándolas.
+- Pruebas: `test_background` (herramienta desactivada invisible y rechazada; plataformas completadas en ajustes antiguos), `test_freno.mjs` (captura en DeepSeek → nota de texto) y revisión visual en Chromium.
