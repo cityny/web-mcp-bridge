@@ -153,6 +153,39 @@ function startRename(label, server) {
   input.addEventListener('blur', () => finish(true));
 }
 
+/** Quita un MCP de servers.json del puente (acepta los tres formatos del archivo). Devuelve true si lo encontró. */
+async function removeFromBridgeConfig(name) {
+  const { content } = await api('GET_BRIDGE_CONFIG');
+  const data = JSON.parse(content);
+  let removed = false;
+  if (Array.isArray(data.servers)) {
+    const before = data.servers.length;
+    data.servers = data.servers.filter((s) => s.name !== name);
+    removed = data.servers.length < before;
+  } else {
+    const box = data.mcpServers && typeof data.mcpServers === 'object' ? data.mcpServers : data;
+    if (Object.hasOwn(box, name)) { delete box[name]; removed = true; }
+  }
+  if (removed) await api('PUT_BRIDGE_CONFIG', { content: JSON.stringify(data, null, 2) });
+  return removed;
+}
+
+/** Copia el comando de terminal para detener este MCP (usa la ruta real de servers.json del puente). */
+async function copyStopCommand(server) {
+  let script = 'server\\mcp_ctl.py';
+  try {
+    const { path } = await api('GET_BRIDGE_CONFIG');
+    if (path) script = `${path.replace(/[\\/][^\\/]*$/, '')}\\mcp_ctl.py`;
+  } catch { /* puente apagado: se deja la ruta relativa */ }
+  const command = `py -3 "${script}" stop "${server.name}"`;
+  try {
+    await navigator.clipboard.writeText(command);
+    toast('Comando copiado: pégalo en PowerShell. Con «start» lo reanudas y con «remove» lo quitas.');
+  } catch {
+    prompt('Copia este comando y pégalo en PowerShell:', command);
+  }
+}
+
 function renderServer(server, activeCount) {
   const blocked = server.permission === 'deny';
   const li = el('li', { class: `server${server.enabled ? ' on' : ''}` });
@@ -164,7 +197,7 @@ function renderServer(server, activeCount) {
   const toggle = el('label', { class: 'switch', title: server.enabled ? 'Desactivar' : (checkbox.disabled ? `Máximo ${MAX_ACTIVE_SERVERS} activos` : 'Activar') }, checkbox, el('span'));
 
   const label = el('span', { text: server.name });
-  const idChip = server.slug ? el('code', { class: 'slug', title: 'Id que usa la IA en sus llamadas', text: server.slug }) : null;
+  const idChip = server.slug && server.slug !== server.name ? el('code', { class: 'slug', title: 'Id que usa la IA en sus llamadas', text: server.slug }) : null;
   const name = el('div', { class: 'name' }, el('i', { class: `dot ${server.enabled ? server.status : ''}` }), label, idChip);
   let metaText = server.url;
   if (blocked) metaText += ' · Bloqueado: la IA no lo ve';
@@ -174,7 +207,14 @@ function renderServer(server, activeCount) {
 
   const actions = el('div', { class: 'actions' },
     iconButton('edit', 'Renombrar', () => startRename(label, server)),
-    iconButton('trash', 'Quitar de la extensión', guard(async () => {
+    server.managed ? iconButton('terminal', 'Copiar el comando para detenerlo desde PowerShell', () => copyStopCommand(server).catch((err) => toast(err.message))) : null,
+    iconButton('trash', server.managed ? 'Quitar (también de servers.json)' : 'Quitar de la extensión', guard(async () => {
+      if (server.managed) {
+        if (!confirm(`«${server.name}» viene de servers.json del puente: si solo lo quitas de la extensión, «Detectar» lo vuelve a añadir.\n\nAceptar = quitarlo también de servers.json (queda copia en servers.json.bak).\nCancelar = no hacer nada.`)) return;
+        try { await removeFromBridgeConfig(server.name); } catch (err) { toast(`No se pudo quitar de servers.json: ${err.message}`); return; }
+        await api('REMOVE_SERVER', { id: server.id });
+        return;
+      }
       if (confirm(`¿Quitar «${server.name}» de la extensión? (No se borra de la configuración del PC; «Detectar» lo volvería a añadir).`)) {
         await api('REMOVE_SERVER', { id: server.id });
       }
@@ -240,7 +280,8 @@ function renderTools(server, tools) {
 
 function renderServers(state) {
   const active = state.servers.filter((s) => s.enabled);
-  $('#counter').textContent = `${active.length} de ${MAX_ACTIVE_SERVERS} activos`;
+  $('#counter').textContent = `${active.length} ${active.length === 1 ? 'activo' : 'activos'} · máx. ${MAX_ACTIVE_SERVERS}`;
+  $('#counter').title = `Máximo de MCP activos a la vez: ${MAX_ACTIVE_SERVERS}. Ahora hay ${state.servers.length} MCP en la lista.`;
   const tokens = active.reduce((sum, s) => sum + s.approxTokens, 0);
   $('#tokens').textContent = active.length ? `· ≈ ${tokens.toLocaleString('es')} tokens` : '';
   $('#summary').hidden = state.servers.length === 0;
