@@ -35,6 +35,8 @@
       this.selectors = selectors;
       this.executed = this.#loadExecuted();
       this.baselineUntil = 0;
+      this.rememberedInfo = new Map(); // id → { count, text }: dónde estaba la conversación cuando se lanzó cada llamada
+      this.seenOn = new WeakMap();     // mensaje (elemento) → ids que ya lanzó
       this.trace = () => {}; // core_bridge lo conecta al registro de auditoría: trace(evento, detalles, nivel)
       this.lastActivity = 0;
       this.freshChat = false;
@@ -148,14 +150,32 @@
           const calls = WMB.extractMcpCalls(i === last ? text : element.textContent || '');
           calls.forEach((call, n) => {
             const id = `${this.getMessageKey(element, i)}#${n}:${WMB.hash(JSON.stringify(call))}`;
-            if (this.executed.has(id)) {
+            let known = this.executed.has(id);
+            if (known && !baseline && i === last && n === 0) {
+              // La clave depende del contenido: un git_push idéntico a uno anterior choca con él. Si es OTRA respuesta de la IA
+              // (otro elemento y más mensajes o texto distinto) es una llamada nueva y legítima; un repintado del mismo mensaje no.
+              const info = this.rememberedInfo.get(id);
+              if (info && !this.seenOn.get(element)?.has(id) && (messages.length > info.count || text !== info.text)) {
+                known = false;
+                this.trace('call.repeated', { server: call.server, tool: call.name, reason: 'llamada idéntica a una anterior, en una respuesta nueva' });
+              }
+            }
+            if (known) {
               if (!baseline && !traced.has(id)) {
                 traced.add(id);
-                this.trace('call.skipped', { reason: 'duplicate', server: call.server, tool: call.name });
+                this.trace('call.skipped', {
+                  reason: 'duplicate', server: call.server, tool: call.name, lastMessage: i === last,
+                  seenHere: Boolean(this.seenOn.get(element)?.has(id)), knownBefore: this.rememberedInfo.has(id),
+                });
               }
               return;
             }
             this.#remember(id);
+            this.rememberedInfo.set(id, { count: messages.length, text });
+            if (this.rememberedInfo.size > 300) this.rememberedInfo.delete(this.rememberedInfo.keys().next().value);
+            const launched = this.seenOn.get(element) ?? new Set();
+            launched.add(id);
+            this.seenOn.set(element, launched);
             // Protocolo: una llamada por mensaje → solo se ejecuta la primera.
             if (!baseline && n === 0) callback({ id, call, element });
             else this.trace('call.skipped', { reason: baseline ? 'baseline' : 'extra_in_message', server: call.server, tool: call.name, n }, baseline ? 'info' : 'warn'); // al recargar la pestaña es normal memorizar las llamadas viejas

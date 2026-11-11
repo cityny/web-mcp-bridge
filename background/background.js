@@ -47,13 +47,15 @@ const isUsable = (s) => s.enabled && s.url && s.permission !== 'deny';
 const saveServers = (servers) => chrome.storage.local.set({ [KEYS.servers]: servers });
 
 /** Identificador legible y único que usará la IA para nombrar cada servidor. */
+const sameKey = (a, b) => String(a ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '_') === String(b ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '_');
+
 function assignSlugs(servers) {
   const used = new Set();
   const slugs = new Map();
   // Los MCP ya configurados (con dirección) eligen primero: así el MCP por defecto sin configurar no les quita el nombre.
   for (const s of [...servers].sort((a, b) => Boolean(b.url) - Boolean(a.url))) {
     const base = s.name.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-      .replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') || 'mcp';
+      .replace(/[^a-z0-9_-]+/g, '_').replace(/^[_-]+|[_-]+$/g, '') || 'mcp'; // se conservan - y _ tal cual para que la IA use el mismo nombre que ve el usuario
     let slug = base;
     for (let n = 2; used.has(slug); n += 1) slug = `${base}_${n}`;
     used.add(slug);
@@ -230,7 +232,8 @@ async function callToolInner({ server, name, arguments: args }) {
   const slugs = assignSlugs(servers);
   const active = servers.filter((s) => s.enabled && s.url);
   const target = server
-    ? active.find((s) => slugs.get(s.id) === server || s.name === server || s.id === server)
+    ? (active.find((s) => slugs.get(s.id) === server || s.name === server || s.id === server)
+      ?? active.find((s) => sameKey(slugs.get(s.id), server) || sameKey(s.name, server))) // «repo_github» por «repo-github»
     : (active.length === 1 ? active[0] : null);
 
   const label = target ? slugs.get(target.id) : (server ?? '?');

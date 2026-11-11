@@ -92,7 +92,13 @@
 
   // Los adaptadores pueden escribir mensajes de depuración en el panel flotante (p. ej. ChatGPT).
   adapter.debug = (kind, message) => widget.log(kind, message);
-  adapter.trace = (event, details, level = 'info') => audit(level, event, details);
+  adapter.trace = (event, details, level = 'info') => {
+    audit(level, event, details);
+    // Una llamada de la última respuesta descartada como «duplicada» que no se lanzó desde ese mensaje: la IA puede quedarse esperando.
+    if (event === 'call.skipped' && details?.reason === 'duplicate' && details.lastMessage && !details.seenHere && !currentCid) {
+      widget.log('err', `Llamada repetida ignorada (${details.tool}). Si la IA se quedó esperando, pídele que la repita.`);
+    }
+  };
   audit('info', 'chat.start', { adapter: adapter.name, path: location.pathname });
 
   function injectionStatus() {

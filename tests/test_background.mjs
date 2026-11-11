@@ -96,7 +96,7 @@ assert.match(res.error, /no permite/);
 await chrome.storage.local.set({ wmb_settings: { autoExecute: true }, wmb_servers: [{ id: 'old', name: 'astrax-mcp', url: 'ws://localhost:8080', enabled: true }] });
 state = await call({ type: 'GET_STATE' });
 assert.equal(state.servers[0].permission, 'allow');
-assert.equal(state.servers[0].slug, 'astrax_mcp');
+assert.equal(state.servers[0].slug, 'astrax-mcp', 'el id conserva el guion medio del nombre');
 await chrome.storage.local.set({ wmb_settings: {} });
 state = await call({ type: 'GET_STATE' });
 assert.equal(state.servers[0].permission, 'ask');
