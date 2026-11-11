@@ -36,15 +36,22 @@
     }
     .pill, .panel { background: var(--bg); border: 1px solid var(--line); box-shadow: 0 6px 24px rgba(0,0,0,.18); }
     .pill {
-      display: flex; gap: 8px; align-items: center; padding: 7px 12px; border-radius: 999px;
-      cursor: pointer; color: inherit; font: inherit;
+      display: flex; gap: 6px; align-items: center; padding: 3px 10px; border-radius: 999px;
+      cursor: pointer; color: inherit; font: inherit; font-size: 12px; line-height: 1.5;
     }
-    .pill.alert { border-color: var(--warn); }
+    .pill.alert { border-color: var(--warn); animation: wmb-pulse 1.4s ease-in-out infinite; }
+    @keyframes wmb-pulse { 50% { box-shadow: 0 0 0 5px rgba(217, 119, 6, .28); } }
     .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
     .dot.ok { background: var(--ok); } .dot.warn { background: var(--warn); }
-    .panel { width: 340px; max-height: 70vh; overflow: auto; border-radius: 12px; padding: 12px 14px; }
+    .panel { width: 300px; max-height: 70vh; overflow: auto; border-radius: 10px; padding: 8px 10px; font-size: 12px; }
     .head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; }
-    .head strong { font-size: 14px; }
+    .head { gap: 6px; margin-bottom: 4px; }
+    .head strong { font-size: 12.5px; }
+    .head .muted { flex: 1; font-size: 11px; }
+    .head button { padding: 0 6px; line-height: 1.4; }
+    .row button { padding: 3px 8px; font-size: 12px; }
+    .lastlog { margin-top: 6px; font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .lastlog.err { color: var(--err); } .lastlog.ok { color: var(--ok); }
     .muted { color: var(--muted); font-size: 12px; }
     ul { list-style: none; margin: 6px 0; padding: 0; display: grid; gap: 4px; }
     li.srv { display: flex; gap: 8px; align-items: center; }
@@ -58,8 +65,8 @@
     .card .size { margin: 6px 0; font-size: 12px; color: #4b5563; }
     .card .size.big { color: #b45309; font-weight: 600; }
     .card pre {
-      margin: 6px 0; padding: 8px; max-height: 140px; overflow: auto; white-space: pre-wrap; word-break: break-word;
-      background: rgba(127,127,127,.12); border-radius: 6px; font: 12px/1.4 ui-monospace, Menlo, Consolas, monospace;
+      margin: 4px 0; padding: 6px; max-height: 90px; overflow: auto; white-space: pre-wrap; word-break: break-word;
+      background: rgba(127,127,127,.12); border-radius: 6px; font: 11px/1.35 ui-monospace, Menlo, Consolas, monospace;
     }
     .log { font-size: 12px; color: var(--muted); }
     .log .err { color: var(--err); } .log .ok { color: var(--ok); }
@@ -120,18 +127,18 @@
       if (!force && this.shadow.activeElement?.tagName === 'SELECT' && Date.now() - this.selectFocusedAt < 6000) return;
       const { servers, toolCount } = this.model;
       const pending = this.approvals.length;
-      const activeLabel = !this.model.bridgeEnabled ? 'Bridge desactivado' : servers.length
-        ? `${servers.length} MCP · ${toolCount} herramientas`
-        : 'Sin MCP activos';
+      const activeLabel = !this.model.bridgeEnabled ? 'MCP apagado' : servers.length ? `MCP · ${toolCount}` : 'Sin MCP';
+      const fullLabel = !this.model.bridgeEnabled ? 'Bridge desactivado' : servers.length ? `${servers.length} MCP · ${toolCount} herramientas` : 'Sin MCP activos';
       const allUp = servers.length > 0 && servers.every((s) => s.status === 'connected');
 
       const pill = h('button', {
         class: `pill${pending ? ' alert' : ''}`,
         'aria-expanded': String(this.open),
+        title: pending ? `${pending} llamada(s) por aprobar` : fullLabel,
         onclick: () => { this.open = !this.open; this.render(); },
       },
       h('i', { class: `dot ${pending ? 'warn' : allUp && this.model.bridgeEnabled ? 'ok' : ''}` }),
-      h('span', {}, pending ? `${pending} llamada${pending > 1 ? 's' : ''} por aprobar` : activeLabel));
+      h('span', {}, pending ? `${pending} por aprobar` : activeLabel));
 
       this.root.replaceChildren(...(this.open ? [this.#panel()] : []), pill);
     }
@@ -152,45 +159,43 @@
     #panel() {
       const { servers, injection, adapterName, bridgeEnabled } = this.model;
       const injectionText = {
-        none: 'Las instrucciones se añadirán solas al enviar tu próximo mensaje.',
-        ok: 'Instrucciones inyectadas y al día.',
-        stale: 'Los MCP activos cambiaron: vuelve a inyectar las instrucciones.',
+        none: 'Instrucciones: se añaden al enviar',
+        ok: 'Instrucciones al día',
+        stale: 'MCP cambiaron: reinyecta',
       }[injection];
       const perms = new Set(servers.map((s) => s.permission));
       const common = perms.size === 1 ? [...perms][0] : 'mixed';
+      const last = this.logs[0];
 
       return h('div', { class: 'panel', role: 'dialog', 'aria-label': 'Web MCP Bridge' },
         h('div', { class: 'head' },
-          h('strong', {}, `Web MCP Bridge · ${adapterName}`),
+          h('strong', {}, adapterName),
+          h('span', { class: 'muted' }, injectionText),
           h('button', { 'aria-label': 'Cerrar', onclick: () => { this.open = false; this.render(true); } }, '✕')),
+
+        this.approvals.map((item) => this.#approvalCard(item)),
 
         servers.length
           ? h('ul', {}, servers.map((s) => h('li', { class: 'srv' },
             h('i', { class: `dot ${s.status === 'connected' ? 'ok' : s.status === 'connecting' ? 'warn' : ''}` }),
-            h('span', { class: 'grow' }, s.name, h('span', { class: 'muted' }, s.permission === 'deny' ? ' · bloqueado' : s.status === 'connected' ? ` · ${s.toolCount} herr.` : ' · sin conexión')),
+            h('span', { class: 'grow' }, s.name, h('span', { class: 'muted' }, s.permission === 'deny' ? ' · bloqueado' : s.status === 'connected' ? ` · ${s.toolCount}` : ' · sin conexión')),
             this.#permSelect(s.permission, (value) => this.handlers.onSetPermission(s.id, value), `Permiso de ${s.name}`))))
           : h('p', { class: 'muted' }, 'Abre el icono de la extensión y activa un servidor MCP.'),
 
         servers.length > 1
-          ? h('div', { class: 'perm' }, h('strong', {}, 'Todos los MCP'),
+          ? h('div', { class: 'perm' }, h('strong', {}, 'Todos'),
             this.#permSelect(common, (value) => this.handlers.onSetPermission(null, value), 'Permiso de todos los MCP'))
           : null,
 
         h('div', { class: 'row' },
+          h('button', { class: 'primary', onclick: () => this.handlers.onInject() }, 'Inyectar'),
+          h('button', { onclick: () => this.handlers.onRefresh() }, 'Actualizar'),
+          h('button', { onclick: () => this.handlers.onOpenLog?.() }, 'Registro'),
           h('button', { class: bridgeEnabled ? 'danger' : 'primary', onclick: () => this.handlers.onToggleBridge(!bridgeEnabled) },
-            bridgeEnabled ? 'Desactivar bridge' : 'Activar bridge')),
+            bridgeEnabled ? 'Apagar' : 'Encender')),
 
-        h('p', { class: 'muted' }, injectionText),
-        h('div', { class: 'row' },
-          h('button', { class: 'primary', onclick: () => this.handlers.onInject() }, 'Inyectar instrucciones'),
-          h('button', { onclick: () => this.handlers.onRefresh() }, 'Actualizar')),
-
-        this.approvals.map((item) => this.#approvalCard(item)),
-
-        this.logs.length
-          ? h('ul', { class: 'log' }, this.logs.map((l) => h('li', { class: l.kind },
-            `${l.ts.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit', second: '2-digit' })} · ${l.text}`)))
-          : null);
+        last ? h('div', { class: `lastlog ${last.kind}`, title: last.text },
+          `${last.ts.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit', second: '2-digit' })} · ${last.text}`) : null);
     }
 
     #choiceCard(item) {

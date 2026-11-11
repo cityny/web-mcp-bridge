@@ -35,6 +35,7 @@
       this.selectors = selectors;
       this.executed = this.#loadExecuted();
       this.baselineUntil = 0;
+      this.trace = () => {}; // core_bridge lo conecta al registro de auditoría: trace(evento, detalles, nivel)
       this.lastActivity = 0;
       this.freshChat = false;
       this.awaitingSince = 0;   // momento en que se envió algo y se espera una respuesta nueva
@@ -96,6 +97,8 @@
       let lastSig = '';
       let lastText = '';
       let lastDone = '';
+      let wasStreaming = false;
+      const traced = new Set(); // eventos ya registrados (evita repetir el mismo aviso en cada análisis)
       let stableSince = Date.now();
       this.baselineUntil = Date.now() + BASELINE_MS;
 
@@ -110,6 +113,10 @@
         const now = Date.now();
         const streaming = this.isStreaming();
         const messages = this.getAssistantMessages();
+        if (streaming !== wasStreaming) {
+          wasStreaming = streaming;
+          if (streaming) this.trace('ai.streaming', { messages: messages.length });
+        }
         if (streaming) {
           this.lastActivity = now;
           this.baselineUntil = 0;                              // hay generación en vivo: la conversación no es «antigua»
@@ -124,6 +131,10 @@
 
         // Con «generando» activo se espera, salvo que el texto lleve un rato estable (indicador pegado).
         if (streaming && now - stableSince < STUCK_MS) { schedule(1000); return; }
+        if (streaming && !traced.has(`stuck${text.length}`)) {
+          traced.add(`stuck${text.length}`);
+          this.trace('ai.stuck_indicator', { stableS: Math.round((now - stableSince) / 1000) }, 'warn');
+        }
 
         const baseline = now < this.baselineUntil;
         const sig = `${location.pathname}|${messages.length}|${last}|${text.length}`;
@@ -137,14 +148,21 @@
           const calls = WMB.extractMcpCalls(i === last ? text : element.textContent || '');
           calls.forEach((call, n) => {
             const id = `${this.getMessageKey(element, i)}#${n}:${WMB.hash(JSON.stringify(call))}`;
-            if (this.executed.has(id)) return;
+            if (this.executed.has(id)) {
+              if (!baseline && !traced.has(id)) {
+                traced.add(id);
+                this.trace('call.skipped', { reason: 'duplicate', server: call.server, tool: call.name }, 'warn');
+              }
+              return;
+            }
             this.#remember(id);
             // Protocolo: una llamada por mensaje → solo se ejecuta la primera.
             if (!baseline && n === 0) callback({ id, call, element });
+            else this.trace('call.skipped', { reason: baseline ? 'baseline' : 'extra_in_message', server: call.server, tool: call.name, n }, 'warn');
           });
           if (!baseline && i === last && !calls.length && !streaming && onDone) {
             const doneKey = `${this.getMessageKey(element, i)}:${text.length}`;
-            if (doneKey !== lastDone) { lastDone = doneKey; onDone({ text, element }); }
+            if (doneKey !== lastDone) { lastDone = doneKey; this.trace('ai.done', { chars: text.length, calls: 0, mentionsCall: text.includes('mcp_call') }); onDone({ text, element }); }
           }
         }
       };

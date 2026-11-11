@@ -96,38 +96,25 @@
       </details>
     </section>
 
-    <!-- ───────── Actividad ───────── -->
+    <!-- ───────── Actividad (registro + llamadas) ───────── -->
     <section id="tab-activity" role="tabpanel" aria-labelledby="tab-btn-activity" hidden>
-      <div class="segmented" role="radiogroup" aria-label="Ver">
-        <button type="button" data-view="calls" aria-pressed="true">Llamadas</button>
-        <button type="button" data-view="logs" aria-pressed="false">Registro</button>
-      </div>
-
-      <div id="view-calls">
-        <div class="summary">
-          <strong>Últimas llamadas a herramientas</strong>
-          <button id="clear-history" class="ghost small" type="button">Borrar</button>
+      <div class="act-toolbar">
+        <div class="chips" role="group" aria-label="Filtrar actividad">
+          <button type="button" data-filter="all" aria-pressed="true">Todo</button>
+          <button type="button" data-filter="calls" aria-pressed="false">Llamadas</button>
+          <button type="button" data-filter="ai" aria-pressed="false">IA</button>
+          <button type="button" data-filter="sync" aria-pressed="false">GitHub</button>
+          <button type="button" data-filter="errors" aria-pressed="false">Errores</button>
         </div>
-        <ul id="history-list" class="list"></ul>
-        <p id="history-empty" class="muted empty-line" hidden>Aún no se ha ejecutado ninguna herramienta. Cuando la IA use una, aparecerá aquí con su resultado y duración.</p>
+        <span class="row-gap">
+          <button id="export-logs" class="ghost small" type="button"><svg class="icon"><use href="#i-download"/></svg>Exportar</button>
+          <button id="clear-logs" class="ghost small" type="button">Borrar</button>
+        </span>
       </div>
-
-      <div id="view-logs" hidden>
-        <div class="summary">
-          <select id="log-level" aria-label="Filtrar por nivel">
-            <option value="all">Todo</option>
-            <option value="warn">Avisos y errores</option>
-            <option value="error">Solo errores</option>
-          </select>
-          <span class="row-gap">
-            <button id="export-logs" class="ghost small" type="button"><svg class="icon"><use href="#i-download"/></svg>Exportar</button>
-            <button id="clear-logs" class="ghost small" type="button">Borrar</button>
-          </span>
-        </div>
-        <p id="log-count" class="muted small-text"></p>
-        <ul id="log-list" class="list"></ul>
-        <p id="log-empty" class="muted empty-line" hidden>Sin eventos. Aquí se registran conexiones, llamadas y errores para revisarlos o exportarlos.</p>
-      </div>
+      <input id="act-search" type="search" placeholder="Buscar: evento, herramienta o #id de llamada" autocomplete="off" spellcheck="false" aria-label="Buscar en la actividad">
+      <p id="act-count" class="muted small-text"></p>
+      <ul id="act-list" class="list act"></ul>
+      <p id="act-empty" class="muted empty-line" hidden>Sin actividad. Aquí aparece cada paso: lo que escribe la IA, las llamadas, su resultado, la comparación con GitHub y los errores. Pulsa una fila para ver el detalle.</p>
     </section>
 
     <!-- ───────── Ajustes ───────── -->

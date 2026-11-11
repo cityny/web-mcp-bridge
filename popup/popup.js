@@ -7,6 +7,7 @@
  *   - Ajustes:   interfaz (panel lateral) y comportamiento en el chat.
  */
 import { MAX_ACTIVE_SERVERS, RECOMMENDED_ACTIVE_SERVERS, PERMISSIONS, PERMISSION_LABELS, DEMO_SERVER, PLATFORM_LABELS } from '../shared/constants.js';
+import { mergeActivity, matchesFilter, CATEGORY_LABEL, fmtMs } from '../shared/activity.js';
 
 const $ = (selector, root = document) => root.querySelector(selector);
 const STATUS_TEXT = {
@@ -263,46 +264,58 @@ function renderGlobalPermission(servers) {
   select.dataset.perm = value;
 }
 
-// ───────────────────────── Actividad ─────────────────────────
+// ───────────────────────── Actividad (registro + llamadas en un solo listado) ─────────────────────────
 
-let activityView = store.get('wmb-activity-view', 'calls');
+let activityFilter = store.get('wmb-activity-filter', 'all');
+let activityQuery = '';
+let activitySig = '';
+const expandedRows = new Set();
+const ACTIVITY_SHOWN = 200;
 
-function setActivityView(view) {
-  activityView = view;
-  store.set('wmb-activity-view', view);
-  for (const b of document.querySelectorAll('.segmented button')) b.setAttribute('aria-pressed', String(b.dataset.view === view));
-  $('#view-calls').hidden = view !== 'calls';
-  $('#view-logs').hidden = view !== 'logs';
-  refresh(true);
+function syncChips() {
+  for (const b of document.querySelectorAll('.chips button')) b.setAttribute('aria-pressed', String(b.dataset.filter === activityFilter));
 }
 
-async function renderHistory() {
-  const { history } = await api('GET_HISTORY');
-  $('#history-empty').hidden = history.length > 0;
-  $('#history-list').replaceChildren(...history.map((h) => el('li', {},
-    el('div', { class: 'row' },
-      el('span', { text: `${h.server} › ${h.tool}` }),
-      el('span', { class: h.status === 'ok' ? 'ok' : 'error', text: h.status === 'ok' ? `OK${h.ms ? ` · ${h.ms} ms` : ''}` : 'Error' })),
-    el('small', { text: `${new Date(h.ts).toLocaleTimeString('es')} · ${h.error ?? h.args}` }),
-  )));
+function setActivityFilter(filter) {
+  activityFilter = filter;
+  store.set('wmb-activity-filter', filter);
+  syncChips();
+  activitySig = '';
+  renderActivity().catch((err) => toast(err.message));
 }
 
-const LOG_SHOWN = 150;
-const LEVEL_RANK = { info: 0, warn: 1, error: 2 };
-const LEVEL_TEXT = { info: 'Info', warn: 'Aviso', error: 'Error' };
+function activityRow(item) {
+  const open = expandedRows.has(item.key);
+  const badges = [el('span', { class: `badge cat-${item.cat}`, text: CATEGORY_LABEL[item.cat] })];
+  if (item.status) badges.push(el('span', { class: `badge st-${item.status.tone}`, text: item.status.text }));
+  if (item.ms != null) badges.push(el('span', { class: 'badge', text: fmtMs(item.ms) }));
+  if (item.platform) badges.push(el('span', { class: 'badge', text: item.platform }));
+  if (item.cid) {
+    badges.push(el('button', {
+      type: 'button', class: 'badge cid', title: 'Ver solo los pasos de esta llamada', text: `#${item.cid}`,
+      onclick: (e) => { e.stopPropagation(); $('#act-search').value = item.cid; activityQuery = item.cid; setActivityFilter('all'); },
+    }));
+  }
+  return el('li', {
+    class: `act-row lvl-${item.level}${open ? ' open' : ''}`,
+    onclick: () => { if (expandedRows.has(item.key)) expandedRows.delete(item.key); else expandedRows.add(item.key); activitySig = ''; renderActivity().catch((err) => toast(err.message)); },
+  },
+  el('div', { class: 'act-head' }, el('div', { class: 'badges' }, ...badges), el('time', { text: new Date(item.ts).toLocaleTimeString('es') })),
+  el('div', { class: 'act-title', text: item.title }),
+  item.summary ? el('small', { text: item.summary }) : null,
+  open ? el('pre', { class: 'act-raw', text: JSON.stringify({ evento: item.event, origen: item.source, ...(item.raw.details ?? {}) }, null, 2) }) : null);
+}
 
-async function renderLogs() {
-  const { logs } = await api('GET_LOGS');
-  const min = { all: 0, warn: 1, error: 2 }[$('#log-level').value] ?? 0;
-  const shown = logs.filter((l) => (LEVEL_RANK[l.level] ?? 0) >= min).slice(-LOG_SHOWN).reverse();
-  $('#log-empty').hidden = shown.length > 0;
-  $('#log-count').textContent = logs.length ? `${logs.length} eventos guardados · se muestran ${shown.length}` : '';
-  $('#log-list').replaceChildren(...shown.map((l) => el('li', {},
-    el('div', { class: 'row' },
-      el('span', { text: `${l.event}${l.platform ? ` · ${l.platform}` : ''}` }),
-      el('span', { class: l.level === 'info' ? 'ok' : l.level, text: LEVEL_TEXT[l.level] ?? l.level })),
-    el('small', { text: `${new Date(l.ts).toLocaleTimeString('es')} · ${l.source}${l.details ? ` · ${JSON.stringify(l.details)}` : ''}` }),
-  )));
+async function renderActivity() {
+  const [{ logs }, { history }] = await Promise.all([api('GET_LOGS'), api('GET_HISTORY')]);
+  const items = mergeActivity(logs, history);
+  const shown = items.filter((i) => matchesFilter(i, activityFilter, activityQuery)).slice(0, ACTIVITY_SHOWN);
+  const sig = `${items.length}|${shown.map((i) => i.key + (expandedRows.has(i.key) ? '+' : '')).join(',')}`;
+  $('#act-empty').hidden = shown.length > 0;
+  $('#act-count').textContent = items.length ? `${items.length} eventos guardados · se muestran ${shown.length}` : '';
+  if (sig === activitySig) return; // nada cambió: no repintar (conserva la selección de texto)
+  activitySig = sig;
+  $('#act-list').replaceChildren(...shown.map(activityRow));
 }
 
 // ───────────────────────── Ajustes ─────────────────────────
@@ -359,10 +372,7 @@ async function refresh(force = false) {
     renderGlobalPermission(state.servers);
     renderSettings(state.settings);
     renderUpdate(state.update);
-    if (currentTab === 'activity') {
-      if (activityView === 'calls') await renderHistory();
-      else await renderLogs();
-    }
+    if (currentTab === 'activity') await renderActivity();
   } catch (err) { toast(err.message); }
 }
 
@@ -377,7 +387,9 @@ document.querySelector('.tabs').addEventListener('keydown', (e) => { // flechas 
   next.focus();
   setTab(next.dataset.tab);
 });
-for (const btn of document.querySelectorAll('.segmented button')) btn.addEventListener('click', () => setActivityView(btn.dataset.view));
+for (const btn of document.querySelectorAll('.chips button')) btn.addEventListener('click', () => setActivityFilter(btn.dataset.filter));
+$('#act-search').addEventListener('input', (e) => { activityQuery = e.target.value; activitySig = ''; renderActivity().catch((err) => toast(err.message)); });
+syncChips();
 
 $('#open-panel').addEventListener('click', async () => {
   try {
@@ -415,19 +427,21 @@ $('#set-maxResultChars').addEventListener('change', guard((e) => {
   const value = Math.min(100000, Math.max(500, Number(e.target.value) || 12000));
   return api('UPDATE_SETTINGS', { settings: { maxResultChars: value } });
 }));
-$('#clear-history').addEventListener('click', guard(async () => { await api('CLEAR_HISTORY'); }));
-$('#log-level').addEventListener('change', () => renderLogs().catch((err) => toast(err.message)));
 $('#clear-logs').addEventListener('click', guard(async () => {
-  if (confirm('¿Borrar todo el registro de eventos?')) await api('CLEAR_LOGS');
+  if (!confirm('¿Borrar toda la actividad (registro y llamadas)?')) return;
+  await api('CLEAR_LOGS');
+  await api('CLEAR_HISTORY');
+  expandedRows.clear();
+  activitySig = '';
 }));
 $('#export-logs').addEventListener('click', guard(async () => {
-  const { logs } = await api('GET_LOGS');
-  const payload = { exportedAt: new Date().toISOString(), version: chrome.runtime.getManifest().version, userAgent: navigator.userAgent, logs };
-  const a = el('a', { download: `web-mcp-bridge-registro-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.json` });
+  const [{ logs }, { history }] = await Promise.all([api('GET_LOGS'), api('GET_HISTORY')]);
+  const payload = { exportedAt: new Date().toISOString(), version: chrome.runtime.getManifest().version, userAgent: navigator.userAgent, logs, history };
+  const a = el('a', { download: `web-mcp-bridge-actividad-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.json` });
   a.href = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }));
   a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 5000);
-  toast(`Exportados ${logs.length} eventos.`);
+  toast(`Exportados ${logs.length} eventos y ${history.length} llamadas.`);
 }));
 
 // Plataformas: casillas generadas a partir de PLATFORM_LABELS
@@ -443,7 +457,6 @@ $('#platforms').replaceChildren(...Object.entries(PLATFORM_LABELS).map(([id, nam
 // ───────────────────────── Inicio ─────────────────────────
 
 setTab(currentTab);
-setActivityView(activityView);
 discover(true);
 setInterval(refresh, 1500);
 if (!isPopup) setInterval(() => discover(true), 20_000); // el panel queda abierto: el estado del puente se mantiene al día

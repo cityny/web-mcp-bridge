@@ -62,6 +62,10 @@
   const widget = new WMB.Widget({
     onInject: () => injectInstructions(),
     onRefresh: () => { adapter.rescan(); return refresh(true); },
+    onOpenLog: async () => {
+      const res = await send({ type: 'OPEN_PANEL' });
+      if (!res?.ok) widget.log('err', 'Abre el icono de la extensión → Actividad para ver el registro.');
+    },
     onToggleBridge: async (value) => {
       await send({ type: 'UPDATE_SETTINGS', settings: { bridgeEnabled: value } });
       await refresh();
@@ -74,7 +78,10 @@
   });
 
   /** Registro de auditoría (en el service worker). Nunca incluye el texto de tus mensajes. */
-  const audit = (level, event, details) => { send({ type: 'LOG', level, event, details, platform: adapter.id }); };
+  let currentCid = ''; // id corto de la llamada en curso: todos sus pasos lo llevan para poder seguirla de principio a fin
+  const audit = (level, event, details) => {
+    send({ type: 'LOG', level, event, details: currentCid && !details?.cid ? { cid: currentCid, ...details } : details, platform: adapter.id });
+  };
 
   // Todo lo que se muestra en el panel flotante también queda en el registro.
   const showLog = widget.log.bind(widget);
@@ -85,6 +92,7 @@
 
   // Los adaptadores pueden escribir mensajes de depuración en el panel flotante (p. ej. ChatGPT).
   adapter.debug = (kind, message) => widget.log(kind, message);
+  adapter.trace = (event, details, level = 'info') => audit(level, event, details);
   audit('info', 'chat.start', { adapter: adapter.name, path: location.pathname });
 
   function injectionStatus() {
@@ -182,6 +190,7 @@
       server: srv.slug, tool: call.name, status, ok: sent.ok, error: sent.error, files: plan.files.length, attached,
     });
     widget.log(sent.ok ? 'ok' : 'err', sent.ok ? `Resultado enviado a ${adapter.name}.` : sent.error);
+    if (sent.ok) watchAi();
   }
 
   /** Busca el MCP y la herramienta de una llamada; si el estado local pudiera estar viejo, lo refresca una vez. */
@@ -207,9 +216,11 @@
     if (!platformOn()) return; // plataforma desactivada por el usuario
     audit('info', 'call.detected', { server: call.server, tool: call.name, args: JSON.stringify(call.arguments ?? {}) });
     const { srv, tool } = await resolveCall(call);
+    audit('info', 'call.resolved', { server: srv?.slug ?? call.server ?? null, tool: call.name, serverFound: Boolean(srv), toolFound: Boolean(tool) });
 
     // Llamada que no corresponde a ningún MCP activo (p. ej. la IA explicando el formato): se ignora.
     if (!srv) {
+      audit('warn', 'call.ignored', { reason: 'server_not_active', requested: call.server ?? null, active: state.servers.map((s) => s.slug) });
       widget.log('err', `Llamada ignorada: servidor «${call.server ?? '?'}» no activo.`);
       return;
     }
@@ -234,9 +245,11 @@
       if (reason) audit('warn', 'call.brake', { server: srv.slug, tool: call.name, fails, repeats: brake.repeats });
 
       if (srv.permission === 'ask' || reason) {
+        const askedAt = Date.now();
+        audit('info', 'call.approval.wait', { mode: srv.permission, brake: Boolean(reason), tool: call.name, size: WMB.sizeOfArguments(call.arguments).chars });
         const answer = await widget.requestApproval({ server: srv.slug, name: call.name, arguments: call.arguments, reason });
         approved = Boolean(answer);
-        audit('info', 'call.approval', { server: srv.slug, tool: call.name, answer: answer || 'reject' });
+        audit('info', 'call.approval', { server: srv.slug, tool: call.name, answer: answer || 'reject', ms: Date.now() - askedAt });
         if (answer === 'always') {
           await send({ type: 'SET_PERMISSION', id: srv.id, permission: 'allow' });
           await refresh();
@@ -256,6 +269,8 @@
         widget.log('err', `Cancelada: ${srv.slug} > ${call.name}`);
       } else {
         widget.log('ok', `Ejecutando ${srv.slug} › ${call.name}…`);
+        const execAt = Date.now();
+        audit('info', 'call.exec.start', { server: srv.slug, tool: call.name, mode: srv.permission, size: WMB.sizeOfArguments(call.arguments).chars });
         let response;
         try {
           const limit = (Math.min(1800, Math.max(10, Number(state.settings.toolTimeoutSec) || 300)) + 30) * 1000; // + margen sobre el del service worker
@@ -266,6 +281,8 @@
         if (!response?.ok) result = { status: 'error', text: response?.error ?? 'Error desconocido.' };
         else result = { status: response.result?.isError ? 'error' : 'ok', raw: response.result };
         brake.fails[srv.slug] = result.status === 'ok' ? 0 : fails + 1;
+        const errorText = result.status === 'ok' ? undefined : String(result.text ?? (result.raw?.content ?? []).filter((c) => c.type === 'text').map((c) => c.text).join(' ')).slice(0, 200);
+        audit(result.status === 'ok' ? 'info' : 'warn', 'call.exec.end', { server: srv.slug, tool: call.name, status: result.status, ms: Date.now() - execAt, error: errorText });
         widget.log(result.status === 'ok' ? 'ok' : 'err', `${call.name}: ${result.status}`);
       }
     }
@@ -273,6 +290,7 @@
       if (Array.isArray(result.raw?.content)) result.raw = { ...result.raw, content: [{ type: 'text', text: sync.note }, ...result.raw.content] };
       else result.text = `${sync.note}\n${result.text ?? ''}`.trim();
     }
+    audit('info', 'result.deliver.start', { server: srv.slug, tool: call.name, status: result.status });
     await guarded(deliver(srv, call, result), DELIVER_TIMEOUT_MS, 'El chat no aceptó el resultado a tiempo.');
   }
 
@@ -350,6 +368,22 @@
     return {}; // «local» o «clean»: nada que decidir
   }
 
+  let awaitingAiSince = 0; // desde cuándo se espera respuesta de la IA tras entregarle algo
+  const AI_WAIT_STEPS_MS = [45_000, 120_000];
+
+  /** Vigila que la IA conteste después de recibir un resultado; si no lo hace, queda en el registro y en el panel. */
+  async function watchAi() {
+    const started = Date.now();
+    awaitingAiSince = started;
+    for (const limit of AI_WAIT_STEPS_MS) {
+      await WMB.sleep(Math.max(0, limit - (Date.now() - started)));
+      if (awaitingAiSince !== started || adapter.lastActivity > started) return; // la IA ya contestó (o llegó otra llamada)
+      const waitedS = Math.round((Date.now() - started) / 1000);
+      audit('warn', 'ai.no_response', { waitedS, streaming: adapter.isStreaming() });
+      widget.log('err', `La IA no responde desde hace ${waitedS} s tras recibir el resultado.`);
+    }
+  }
+
   let lastUnreadable = '';
   let unreadableRetries = 0; // reintentos automáticos seguidos; se reinicia con una llamada válida
   const RETRY_LIMITS = [3000, 1500, 800]; // caracteres máx. por trozo en cada reintento
@@ -389,16 +423,23 @@
       + 'El contenido de archivos va en crudo entre @@@ y @@@ (sin escapar comillas ni saltos de línea). Formato: un único bloque ```json con {"mcp_call":{"server":"…","name":"…","arguments":{…}}}; usa / en las rutas.\n[/MCP_RESULT]';
     const sent = await adapter.sendToolResult(message, { autoSend: state.settings.autoSend });
     if (!sent.ok) widget.log('err', sent.error);
+    else watchAi();
   }
 
   /** Nunca deja que un fallo o una llamada atascada bloquee las siguientes. */
   async function processCall(detected) {
+    currentCid = Math.random().toString(36).slice(2, 7);
+    awaitingAiSince = 0;
+    const startedAt = Date.now();
     unreadableRetries = 0; // llegó una llamada legible: se reinicia el reintento automático
     try {
       await handleCall(detected);
     } catch (err) {
       widget.log('err', `Error: ${err.message}`);
       audit('error', 'call.failed', { tool: detected?.call?.name, error: err.message, stack: String(err.stack ?? '').split('\n').slice(0, 3).join(' | ') });
+    } finally {
+      audit('info', 'call.done', { ms: Date.now() - startedAt });
+      currentCid = '';
     }
   }
 
@@ -491,6 +532,7 @@
       },
       {
         onDone: ({ text, element }) => {
+          awaitingAiSince = 0; // la IA terminó de responder
           // La IA intentó llamar a una herramienta pero el bloque no se puede leer: antes se ignoraba en silencio.
           if (!platformOn()) return;
           const problem = state.settings.bridgeEnabled && state.tools.length ? WMB.diagnoseMcpCall(text) : null;

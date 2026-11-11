@@ -553,6 +553,11 @@ async function handleMessage(msg, sender) {
     case 'OPEN_EDITOR':
       await chrome.tabs.create({ url: chrome.runtime.getURL('editor/editor.html') });
       return { ok: true };
+    case 'OPEN_PANEL': {
+      if (sender?.tab?.id == null) throw new Error('No hay pestaña de origen.');
+      await chrome.sidePanel.open({ tabId: sender.tab.id });
+      return { ok: true };
+    }
     case 'CLEAR_LOGS':
       await clearLogs();
       log('info', 'logs.cleared');
