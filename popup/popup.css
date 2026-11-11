@@ -247,3 +247,4 @@ input[type="text"], input[type="number"] {
 @media (prefers-color-scheme: dark) {
   .badge.cat-ai { color: #c4b5fd; } .badge.cat-sync { color: #7dd3fc; }
 }
+.slug { margin-left: 6px; font-size: 10.5px; color: var(--muted); }

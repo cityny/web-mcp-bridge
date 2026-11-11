@@ -164,7 +164,8 @@ function renderServer(server, activeCount) {
   const toggle = el('label', { class: 'switch', title: server.enabled ? 'Desactivar' : (checkbox.disabled ? `Máximo ${MAX_ACTIVE_SERVERS} activos` : 'Activar') }, checkbox, el('span'));
 
   const label = el('span', { text: server.name });
-  const name = el('div', { class: 'name' }, el('i', { class: `dot ${server.enabled ? server.status : ''}` }), label);
+  const idChip = server.slug ? el('code', { class: 'slug', title: 'Id que usa la IA en sus llamadas', text: server.slug }) : null;
+  const name = el('div', { class: 'name' }, el('i', { class: `dot ${server.enabled ? server.status : ''}` }), label, idChip);
   let metaText = server.url;
   if (blocked) metaText += ' · Bloqueado: la IA no lo ve';
   else if (server.enabled) metaText += ` · ${STATUS_TEXT[server.status] ?? server.status}`;
