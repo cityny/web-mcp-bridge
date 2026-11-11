@@ -78,6 +78,10 @@
   });
 
   /** Registro de auditoría (en el service worker). Nunca incluye el texto de tus mensajes. */
+  // Seguimiento de cada llamada de la IA: ¿llegó a ejecutarse y a entregarse el resultado?
+  const tracked = new Map(); // id → { state: 'queued'|'running'|'delivered'|'failed', at, tries }
+  const QUEUE_WARN_MS = 8000;
+  let currentId = ''; // id de la llamada que se está procesando
   let currentCid = ''; // id corto de la llamada en curso: todos sus pasos lo llevan para poder seguirla de principio a fin
   const audit = (level, event, details) => {
     send({ type: 'LOG', level, event, details: currentCid && !details?.cid ? { cid: currentCid, ...details } : details, platform: adapter.id });
@@ -218,8 +222,8 @@
 
   /** Procesa una llamada MCP detectada en la respuesta de la IA. */
   async function handleCall({ call }) {
-    if (!state.settings.bridgeEnabled) return; // bridge apagado: se ignoran las llamadas
-    if (!platformOn()) return; // plataforma desactivada por el usuario
+    if (!state.settings.bridgeEnabled) { audit('warn', 'call.ignored', { reason: 'bridge_off', tool: call.name }); widget.log('err', `Llamada no ejecutada (${call.name}): el puente está apagado.`); return; }
+    if (!platformOn()) { audit('warn', 'call.ignored', { reason: 'platform_off', tool: call.name }); widget.log('err', `Llamada no ejecutada (${call.name}): esta web está desactivada en la extensión.`); return; }
     audit('info', 'call.detected', { server: call.server, tool: call.name, args: JSON.stringify(call.arguments ?? {}) });
     const { srv, tool } = await resolveCall(call);
     audit('info', 'call.resolved', { server: srv?.slug ?? call.server ?? null, tool: call.name, serverFound: Boolean(srv), toolFound: Boolean(tool) });
@@ -296,6 +300,7 @@
       if (Array.isArray(result.raw?.content)) result.raw = { ...result.raw, content: [{ type: 'text', text: sync.note }, ...result.raw.content] };
       else result.text = `${sync.note}\n${result.text ?? ''}`.trim();
     }
+    if (currentId) { const t = tracked.get(currentId); if (t) t.state = 'delivered'; }
     audit('info', 'result.deliver.start', { server: srv.slug, tool: call.name, status: result.status });
     await guarded(deliver(srv, call, result), DELIVER_TIMEOUT_MS, 'El chat no aceptó el resultado a tiempo.');
   }
@@ -434,6 +439,8 @@
 
   /** Nunca deja que un fallo o una llamada atascada bloquee las siguientes. */
   async function processCall(detected) {
+    currentId = detected.id;
+    { const t = tracked.get(detected.id); if (t) t.state = 'running'; }
     currentCid = Math.random().toString(36).slice(2, 7);
     awaitingAiSince = 0;
     const startedAt = Date.now();
@@ -444,6 +451,14 @@
       widget.log('err', `Error: ${err.message}`);
       audit('error', 'call.failed', { tool: detected?.call?.name, error: err.message, stack: String(err.stack ?? '').split('\n').slice(0, 3).join(' | ') });
     } finally {
+      const t = tracked.get(detected.id);
+      if (t && t.state !== 'delivered') {
+        t.state = 'failed';
+        audit('warn', 'call.not_executed', { tool: detected?.call?.name, ms: Date.now() - startedAt });
+        widget.log('err', `La llamada ${detected?.call?.name ?? ''} no llegó a ejecutarse. Reintentando…`);
+        setTimeout(() => adapter.rescan?.(), 1500); // la reintenta el escáner si el mensaje sigue ahí
+      }
+      currentId = '';
       audit('info', 'call.done', { ms: Date.now() - startedAt });
       currentCid = '';
     }
@@ -530,10 +545,21 @@
     }
   })();
 
+  // La página pregunta si una llamada ya fue entregada o sigue en curso (para no ejecutarla dos veces ni darla por hecha sin estarlo).
+  adapter.callStatus = (id) => tracked.get(id)?.state ?? null;
   refresh().then(() => {
     adapter.observeResponses(
       (detected) => {
         // Se procesan en serie para no mezclar resultados.
+        tracked.set(detected.id, { state: 'queued', at: Date.now() });
+        if (tracked.size > 200) tracked.delete(tracked.keys().next().value);
+        // Si otra llamada anterior bloquea la cola, que se note en vez de quedar en silencio.
+        setTimeout(() => {
+          if (tracked.get(detected.id)?.state === 'queued') {
+            audit('warn', 'call.queue_blocked', { tool: detected.call?.name, waitedMs: Date.now() - tracked.get(detected.id).at });
+            widget.log('err', `La llamada ${detected.call?.name ?? ''} espera a otra anterior que no termina.`);
+          }
+        }, QUEUE_WARN_MS);
         queue = queue.then(() => processCall(detected));
       },
       {

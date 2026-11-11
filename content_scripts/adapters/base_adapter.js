@@ -36,6 +36,7 @@
       this.executed = this.#loadExecuted();
       this.baselineUntil = 0;
       this.rememberedInfo = new Map(); // id → { count, text }: dónde estaba la conversación cuando se lanzó cada llamada
+      this.retries = new Map();        // id → reintentos de una llamada que no llegó a ejecutarse
       this.liveEls = new WeakSet();    // respuestas que vimos generarse en vivo en esta pestaña (no son un repintado)
       this.seenOn = new WeakMap();     // mensaje (elemento) → ids que ya lanzó
       this.trace = () => {}; // core_bridge lo conecta al registro de auditoría: trace(evento, detalles, nivel)
@@ -160,7 +161,13 @@
               const info = this.rememberedInfo.get(id);
               const fresh = info ? (messages.length > info.count || text !== info.text) : false;
               // Sin memoria previa (p. ej. tras recargar) o misma posición («regenerar»): si la vimos generarse en vivo, es una respuesta nueva.
-              if (!this.seenOn.get(element)?.has(id) && (fresh || this.liveEls.has(element))) {
+              const status = this.callStatus ? this.callStatus(id) : null;
+              const lost = status === 'failed' && (this.retries.get(id) ?? 0) < 2; // la lanzó pero nunca se ejecutó
+              if (lost) {
+                this.retries.set(id, (this.retries.get(id) ?? 0) + 1);
+                known = false;
+                this.trace('call.retry_unexecuted', { server: call.server, tool: call.name, attempt: this.retries.get(id) }, 'warn');
+              } else if (!this.seenOn.get(element)?.has(id) && (fresh || this.liveEls.has(element))) {
                 known = false;
                 this.trace('call.repeated', { server: call.server, tool: call.name, reason: 'llamada idéntica a una anterior, en una respuesta nueva' });
               }
