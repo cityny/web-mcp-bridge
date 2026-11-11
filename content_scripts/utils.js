@@ -146,6 +146,15 @@
     return JSON.parse(repairBackslashes(json));
   }
 
+  /**
+   * Contenido en crudo: la IA escribe `"content":@@@ ...código... @@@` sin escapar nada y aquí se
+   * convierte en una cadena JSON válida antes de leer la llamada. Tolera comillas pegadas a los @@@.
+   */
+  const RAW_BLOCK = /"?@@@[ \t]*\r?\n?([\s\S]*?)\r?\n?[ \t]*@@@"?/g;
+  function expandRawBlocks(text) {
+    return text.includes('@@@') ? text.replace(RAW_BLOCK, (_, body) => JSON.stringify(body)) : text;
+  }
+
   function scanCalls(text) {
     const calls = [];
     const marker = '"mcp_call"';
@@ -182,7 +191,7 @@
    * @returns {{server:string|null,name:string,arguments:object}[]}
    */
   WMB.extractMcpCalls = (rawText) => {
-    const raw = String(rawText).replace(/[\u00a0\u200b\u2028\u2029]/g, ' ');
+    const raw = expandRawBlocks(String(rawText).replace(/[\u00a0\u200b\u2028\u2029]/g, ' '));
     const calls = scanCalls(raw);
     if (calls.length || !raw.includes('mcp_call')) return calls;
     // Último recurso: algunos renderizadores convierten las comillas rectas en tipográficas (“ ”).
@@ -200,8 +209,9 @@
    * @returns {string|null} motivo, o null si no hay intento de llamada o si se lee bien
    */
   WMB.diagnoseMcpCall = (rawText) => {
-    const text = String(rawText ?? '').replace(/[\u00a0\u200b\u2028\u2029]/g, ' ');
+    const text = expandRawBlocks(String(rawText ?? '').replace(/[\u00a0\u200b\u2028\u2029]/g, ' '));
     if (!CALL_ATTEMPT.test(text) || WMB.extractMcpCalls(text).length) return null;
+    if ((text.match(/@@@/g) || []).length % 2) return 'falta el @@@ de cierre del contenido (el mensaje se cortó o quedó sin terminar)';
     const at = text.search(CALL_ATTEMPT);
     const end = findBalancedEnd(text, at);
     if (end === -1) return 'el bloque JSON no está cerrado (faltan llaves «}» o comillas sin cerrar)';
