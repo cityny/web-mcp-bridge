@@ -36,6 +36,7 @@
       this.executed = this.#loadExecuted();
       this.baselineUntil = 0;
       this.rememberedInfo = new Map(); // id → { count, text }: dónde estaba la conversación cuando se lanzó cada llamada
+      this.liveEls = new WeakSet();    // respuestas que vimos generarse en vivo en esta pestaña (no son un repintado)
       this.seenOn = new WeakMap();     // mensaje (elemento) → ids que ya lanzó
       this.trace = () => {}; // core_bridge lo conecta al registro de auditoría: trace(evento, detalles, nivel)
       this.lastActivity = 0;
@@ -120,6 +121,7 @@
           if (streaming) this.trace('ai.streaming', { messages: messages.length });
         }
         if (streaming) {
+          lastSig = '';                                        // al terminar de generar, volver a analizar aunque el texto mida igual
           this.lastActivity = now;
           this.baselineUntil = 0;                              // hay generación en vivo: la conversación no es «antigua»
           if (messages.length <= 1) this.freshChat = true;     // primera respuesta de un chat nuevo
@@ -129,6 +131,7 @@
         let last = -1;
         for (let i = messages.length - 1; i >= 0 && last < 0; i -= 1) if ((messages[i].textContent || '').trim()) last = i;
         const text = last >= 0 ? messages[last].textContent : '';
+        if (streaming && last >= 0) this.liveEls.add(messages[last]);
         if (text !== lastText) { lastText = text; stableSince = now; this.awaitingSince = 0; } // llegó contenido nuevo
 
         // Con «generando» activo se espera, salvo que el texto lleve un rato estable (indicador pegado).
@@ -155,7 +158,9 @@
               // La clave depende del contenido: un git_push idéntico a uno anterior choca con él. Si es OTRA respuesta de la IA
               // (otro elemento y más mensajes o texto distinto) es una llamada nueva y legítima; un repintado del mismo mensaje no.
               const info = this.rememberedInfo.get(id);
-              if (info && !this.seenOn.get(element)?.has(id) && (messages.length > info.count || text !== info.text)) {
+              const fresh = info ? (messages.length > info.count || text !== info.text) : false;
+              // Sin memoria previa (p. ej. tras recargar) o misma posición («regenerar»): si la vimos generarse en vivo, es una respuesta nueva.
+              if (!this.seenOn.get(element)?.has(id) && (fresh || this.liveEls.has(element))) {
                 known = false;
                 this.trace('call.repeated', { server: call.server, tool: call.name, reason: 'llamada idéntica a una anterior, en una respuesta nueva' });
               }
