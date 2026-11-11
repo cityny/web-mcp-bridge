@@ -269,6 +269,8 @@
   }
 
   let lastUnreadable = '';
+  let unreadableRetries = 0; // reintentos automáticos seguidos; se reinicia con una llamada válida
+  const RETRY_LIMITS = [3000, 1500, 800]; // caracteres máx. por trozo en cada reintento
 
   const UNREADABLE_SETTLE_MS = 8000;
 
@@ -290,10 +292,18 @@
     lastUnreadable = sig;
     widget.log('err', `La IA escribió una llamada que no se puede leer: ${problem}.`);
     audit('warn', 'call.unreadable', { problem, snippet });
+    unreadableRetries += 1;
+    if (unreadableRetries > RETRY_LIMITS.length) {
+      widget.log('err', `La IA no logra enviar el bloque tras ${RETRY_LIMITS.length} reintentos: se detiene el reintento automático. Pídele una versión más corta o continúa tú.`);
+      audit('warn', 'call.retry_stop', { problem });
+      return;
+    }
+    const chunk = RETRY_LIMITS[unreadableRetries - 1];
+    widget.log('err', `Reintento automático ${unreadableRetries}/${RETRY_LIMITS.length}: se pide a la IA trozos de ~${chunk} caracteres.`);
     const size = text.length - Math.max(at, 0);
     const message = `[MCP_RESULT status="error"]\nNo se pudo leer tu bloque mcp_call: ${problem}. No se ejecutó nada. `
       + `Tu bloque medía unos ${size} caracteres${size > 3500 ? ': es demasiado largo y el mensaje se corta' : ''}. `
-      + 'No lo repitas igual: divídelo en trozos de máx. ~3000 caracteres, UNA llamada por mensaje (write_file con el primer trozo terminado en el marcador /*PARTE2*/ y después edit_file cambiando el marcador por el siguiente trozo + marcador nuevo). '
+      + `No lo repitas igual (reintento ${unreadableRetries}/${RETRY_LIMITS.length}): divídelo en trozos de máx. ~${chunk} caracteres, UNA llamada por mensaje: write_file con el primer trozo y append_file con los siguientes (si no existe append_file: edit_file cambiando el marcador /*PARTE2*/ por el trozo siguiente + marcador nuevo). `
       + 'El contenido de archivos va en crudo entre @@@ y @@@ (sin escapar comillas ni saltos de línea). Formato: un único bloque ```json con {"mcp_call":{"server":"…","name":"…","arguments":{…}}}; usa / en las rutas.\n[/MCP_RESULT]';
     const sent = await adapter.sendToolResult(message, { autoSend: state.settings.autoSend });
     if (!sent.ok) widget.log('err', sent.error);
@@ -301,6 +311,7 @@
 
   /** Nunca deja que un fallo o una llamada atascada bloquee las siguientes. */
   async function processCall(detected) {
+    unreadableRetries = 0; // llegó una llamada legible: se reinicia el reintento automático
     try {
       await handleCall(detected);
     } catch (err) {

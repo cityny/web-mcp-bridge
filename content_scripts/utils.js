@@ -201,6 +201,18 @@
   /** Expuesto para tests y adaptadores. */
   WMB.repairJsonBackslashes = repairBackslashes;
 
+  /** Tamaño de los textos de una llamada: caracteres totales y líneas del texto más largo. */
+  WMB.sizeOfArguments = (args) => {
+    let chars = 0;
+    let lines = 0;
+    const walk = (v) => {
+      if (typeof v === 'string') { chars += v.length; lines = Math.max(lines, v.split('\n').length); }
+      else if (v && typeof v === 'object') Object.values(v).forEach(walk);
+    };
+    walk(args);
+    return { chars, lines };
+  };
+
   /** ¿El texto CONTIENE un intento de bloque {"mcp_call": …}? (no basta con mencionar la palabra) */
   const CALL_ATTEMPT = /\{\s*["“”]mcp_call["“”]\s*:/;
 

@@ -29,4 +29,10 @@ assert.equal(calls[0].arguments.content, 'a "b"\nc');
 
 // Mensaje cortado: @@@ sin cerrar → diagnóstico claro
 assert.match(WMB.diagnoseMcpCall('{"mcp_call":{"server":"f","name":"w","arguments":{"content":@@@\n<div>'), /@@@ de cierre/);
+
+// Tamaño de una llamada (se muestra en el panel de aprobación)
+const size = WMB.sizeOfArguments({ path: 'a.txt', content: 'x\ny\nz', edits: [{ oldText: 'ab', newText: 'cd' }], n: 5 });
+assert.equal(size.chars, 5 + 5 + 2 + 2);
+assert.equal(size.lines, 3);
+assert.deepEqual({ ...WMB.sizeOfArguments(undefined) }, { chars: 0, lines: 0 });
 console.log('✔ test_raw: todo correcto');

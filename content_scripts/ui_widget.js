@@ -55,6 +55,8 @@
     button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
     .card { margin: 8px 0; padding: 10px; border: 1px solid var(--warn); border-radius: 10px; }
     .card .reason { margin: 6px 0; padding: 6px 8px; border-radius: 8px; background: rgba(220, 38, 38, .12); color: #b91c1c; font-size: 12px; }
+    .card .size { margin: 6px 0; font-size: 12px; color: #4b5563; }
+    .card .size.big { color: #b45309; font-weight: 600; }
     .card pre {
       margin: 6px 0; padding: 8px; max-height: 140px; overflow: auto; white-space: pre-wrap; word-break: break-word;
       background: rgba(127,127,127,.12); border-radius: 6px; font: 12px/1.4 ui-monospace, Menlo, Consolas, monospace;
@@ -189,12 +191,17 @@
         item.resolve(value);
         this.render(true);
       };
+      const size = WMB.sizeOfArguments(call.arguments);
+      const sizeText = size.chars >= 200
+        ? `Tamaño: ${size.chars.toLocaleString('es')} caracteres · ${size.lines} líneas${size.chars > 3500 ? ' · muy grande: puede cortarse' : ''}`
+        : null;
       let args = JSON.stringify(call.arguments ?? {}, null, 2);
       if (args.length > 1500) args = `${args.slice(0, 1500)}\n…`;
       return h('div', { class: 'card' },
         h('strong', {}, call.reason ? 'Freno de seguridad: confirma antes de seguir' : 'La IA quiere ejecutar una herramienta'),
         call.reason ? h('div', { class: 'reason' }, call.reason) : null,
         h('div', {}, `${call.server} › ${call.name}`),
+        sizeText ? h('div', { class: size.chars > 3500 ? 'size big' : 'size' }, sizeText) : null,
         h('pre', {}, args),
         h('div', { class: 'row' },
           h('button', { class: 'primary', onclick: () => decide(true) }, 'Ejecutar'),
