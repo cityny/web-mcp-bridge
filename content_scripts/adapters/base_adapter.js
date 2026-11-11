@@ -133,7 +133,7 @@
         if (streaming && now - stableSince < STUCK_MS) { schedule(1000); return; }
         if (streaming && !traced.has(`stuck${text.length}`)) {
           traced.add(`stuck${text.length}`);
-          this.trace('ai.stuck_indicator', { stableS: Math.round((now - stableSince) / 1000) }, 'warn');
+          this.trace('ai.stuck_indicator', { stableS: Math.round((now - stableSince) / 1000) }); // la IA «pensando» también lo provoca
         }
 
         const baseline = now < this.baselineUntil;
@@ -151,14 +151,14 @@
             if (this.executed.has(id)) {
               if (!baseline && !traced.has(id)) {
                 traced.add(id);
-                this.trace('call.skipped', { reason: 'duplicate', server: call.server, tool: call.name }, 'warn');
+                this.trace('call.skipped', { reason: 'duplicate', server: call.server, tool: call.name });
               }
               return;
             }
             this.#remember(id);
             // Protocolo: una llamada por mensaje → solo se ejecuta la primera.
             if (!baseline && n === 0) callback({ id, call, element });
-            else this.trace('call.skipped', { reason: baseline ? 'baseline' : 'extra_in_message', server: call.server, tool: call.name, n }, 'warn');
+            else this.trace('call.skipped', { reason: baseline ? 'baseline' : 'extra_in_message', server: call.server, tool: call.name, n }, baseline ? 'info' : 'warn'); // al recargar la pestaña es normal memorizar las llamadas viejas
           });
           if (!baseline && i === last && !calls.length && !streaming && onDone) {
             const doneKey = `${this.getMessageKey(element, i)}:${text.length}`;
