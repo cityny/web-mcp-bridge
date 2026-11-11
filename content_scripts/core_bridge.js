@@ -290,9 +290,11 @@
     lastUnreadable = sig;
     widget.log('err', `La IA escribió una llamada que no se puede leer: ${problem}.`);
     audit('warn', 'call.unreadable', { problem, snippet });
+    const size = text.length - Math.max(at, 0);
     const message = `[MCP_RESULT status="error"]\nNo se pudo leer tu bloque mcp_call: ${problem}. No se ejecutó nada. `
-      + 'Repite la llamada con JSON válido: un único bloque ```json con {"mcp_call":{"server":"…","name":"…","arguments":{…}}}; '
-      + 'dentro de los textos escapa las comillas como \\" y usa / en las rutas.\n[/MCP_RESULT]';
+      + `Tu bloque medía unos ${size} caracteres${size > 3500 ? ': es demasiado largo y el mensaje se corta' : ''}. `
+      + 'No lo repitas igual: divídelo en trozos de máx. ~3000 caracteres, UNA llamada por mensaje (write_file con el primer trozo terminado en el marcador /*PARTE2*/ y después edit_file cambiando el marcador por el siguiente trozo + marcador nuevo). '
+      + 'El contenido de archivos va en crudo entre @@@ y @@@ (sin escapar comillas ni saltos de línea). Formato: un único bloque ```json con {"mcp_call":{"server":"…","name":"…","arguments":{…}}}; usa / en las rutas.\n[/MCP_RESULT]';
     const sent = await adapter.sendToolResult(message, { autoSend: state.settings.autoSend });
     if (!sent.ok) widget.log('err', sent.error);
   }
