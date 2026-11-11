@@ -215,6 +215,7 @@
     }
 
     let result;
+    let sync = {};
     if (srv.permission === 'deny') {
       result = { status: 'rejected', text: 'El usuario no permite usar este MCP.' };
       widget.log('err', `Bloqueada: ${srv.slug} › ${call.name}`);
@@ -250,6 +251,9 @@
             : 'El usuario rechazó la ejecución de esta herramienta.',
         };
         widget.log('err', `Rechazada: ${srv.slug} › ${call.name}`);
+      } else if ((sync = await syncBeforeCall(srv, call)).cancel) {
+        result = { status: 'rejected', text: sync.cancel };
+        widget.log('err', `Cancelada: ${srv.slug} > ${call.name}`);
       } else {
         widget.log('ok', `Ejecutando ${srv.slug} › ${call.name}…`);
         let response;
@@ -265,7 +269,85 @@
         widget.log(result.status === 'ok' ? 'ok' : 'err', `${call.name}: ${result.status}`);
       }
     }
+    if (sync.note && result) { // lo que cambió en GitHub se le cuenta a la IA junto con el resultado
+      if (Array.isArray(result.raw?.content)) result.raw = { ...result.raw, content: [{ type: 'text', text: sync.note }, ...result.raw.content] };
+      else result.text = `${sync.note}\n${result.text ?? ''}`.trim();
+    }
     await guarded(deliver(srv, call, result), DELIVER_TIMEOUT_MS, 'El chat no aceptó el resultado a tiempo.');
+  }
+
+  // ───── Sincronización con GitHub antes de tocar un repo (servidores con herramienta `sync_check`, p. ej. repo-github) ─────
+  const syncedAt = new Map(); // «servidor|repo» → ms de la última comprobación
+  const SYNC_RECHECK_MS = 10 * 60 * 1000;
+  const SYNC_ALWAYS = new Set(['git_commit', 'git_push']); // antes de confirmar o subir se vuelve a mirar siempre
+  const SYNC_SKIP = new Set(['sync_check', 'sync_apply', 'list_repos']);
+
+  async function callServer(srv, name, args) {
+    const res = await guarded(send({ type: 'CALL_TOOL', server: srv.slug, name, arguments: args }), TOOL_TIMEOUT_MS, 'El servidor tardó demasiado en responder.');
+    if (!res?.ok) throw new Error(res?.error ?? 'Error desconocido.');
+    const text = (res.result?.content ?? []).filter((c) => c.type === 'text').map((c) => c.text).join('\n');
+    if (res.result?.isError) throw new Error(text || 'Error del servidor.');
+    return text;
+  }
+
+  const fileList = (info) => (info.remoteFiles ?? []).slice(0, 12).map((f) => f.replace('\t', ' ')).join(', ') || 'sin detalle';
+
+  /** Compara GitHub con la copia local ANTES de ejecutar la llamada. Devuelve { cancel?: texto, note?: texto para la IA }. */
+  async function syncBeforeCall(srv, call) {
+    if (SYNC_SKIP.has(call.name) || !state.tools.some((t) => t.server === srv.slug && t.name === 'sync_check')) return {};
+    const repo = call.arguments?.repo;
+    const key = `${srv.slug}|${String(repo ?? '').toLowerCase()}`;
+    if (!SYNC_ALWAYS.has(call.name) && Date.now() - (syncedAt.get(key) ?? 0) < SYNC_RECHECK_MS) return {};
+    let info;
+    try {
+      info = JSON.parse(await callServer(srv, 'sync_check', repo ? { repo } : {}));
+    } catch (err) {
+      widget.log('err', `No se pudo comprobar GitHub: ${err.message}`);
+      return {};
+    }
+    syncedAt.set(key, Date.now());
+    audit('info', 'sync.check', { server: srv.slug, repo: info.repo, status: info.status, behind: info.behind, ahead: info.ahead });
+    if (info.status === 'offline') { widget.log('err', info.summary); return {}; }
+    if (info.status === 'cloned') {
+      widget.log('ok', `${info.repo}: clonado desde GitHub.`);
+      return { note: `[GitHub] ${info.repo} se clonó ahora desde GitHub: es la versión actual del remoto.` };
+    }
+    const apply = async (strategy) => callServer(srv, 'sync_apply', { repo: info.repo, strategy });
+    try {
+      if (info.status === 'behind') { // solo cambió GitHub: nada local que perder, se actualiza y se avisa a la IA
+        await apply('update');
+        widget.log('ok', `${info.repo}: actualizado con ${info.behind} commit(s) nuevo(s) de GitHub.`);
+        return { note: `[GitHub] Antes de ejecutar tu llamada se actualizó ${info.repo} con ${info.behind} commit(s) nuevo(s) hechos directamente en GitHub. Archivos: ${fileList(info)}. Commits: ${(info.remoteCommits ?? []).slice(0, 5).join('; ')}. Tenlo en cuenta: pueden contradecir lo que creías del repo.` };
+      }
+      if (info.status === 'diverged') { // cambiaron GitHub y lo local: decide el usuario
+        const answer = await widget.requestChoice({
+          title: `GitHub y tu copia local de ${info.repo} cambiaron`,
+          lines: [
+            `GitHub: ${info.behind} commit(s) nuevo(s). Archivos: ${fileList(info)}`,
+            `Local: ${(info.dirty ?? []).length} archivo(s) sin confirmar, ${info.ahead} commit(s) sin subir.`,
+            '«Usar GitHub» guarda un respaldo de lo local. «Mantener lo local» mezcla lo nuevo de GitHub y, donde choquen, gana lo local.',
+          ],
+          options: [
+            { value: 'remote', label: 'Usar GitHub', cls: 'primary' },
+            { value: 'local', label: 'Mantener lo local' },
+            { value: 'cancel', label: 'Cancelar llamada', cls: 'danger' },
+          ],
+        });
+        audit('info', 'sync.choice', { server: srv.slug, repo: info.repo, answer });
+        if (answer !== 'remote' && answer !== 'local') {
+          syncedAt.delete(key);
+          return { cancel: `El usuario canceló la llamada: GitHub y la copia local de ${info.repo} tienen cambios distintos y debe decidir cuáles conservar. Espera sus instrucciones.` };
+        }
+        const done = await apply(answer);
+        widget.log('ok', `${info.repo}: ${answer === 'remote' ? 'se usó GitHub' : 'se mantuvo lo local'}.`);
+        return { note: `[GitHub] ${info.repo} tenía cambios nuevos en GitHub y también locales; el usuario eligió ${answer === 'remote' ? 'usar la versión de GitHub' : 'mantener lo local'}. ${done} Archivos cambiados en GitHub: ${fileList(info)}.` };
+      }
+    } catch (err) {
+      widget.log('err', `No se pudo sincronizar ${info.repo}: ${err.message}`);
+      syncedAt.delete(key);
+      return { cancel: `No se ejecutó nada: no se pudo sincronizar ${info.repo} con GitHub (${err.message}). Explícaselo al usuario.` };
+    }
+    return {}; // «local» o «clean»: nada que decidir
   }
 
   let lastUnreadable = '';

@@ -104,6 +104,15 @@
       });
     }
 
+    /** Pregunta con varias opciones. `choice` = { title, lines[], options: [{ value, label, cls? }] }. Resuelve con el `value` elegido. */
+    requestChoice(choice) {
+      return new Promise((resolve) => {
+        this.approvals.push({ choice, resolve });
+        this.open = true;
+        this.render(true);
+      });
+    }
+
     // ───────────── Render ─────────────
 
     render(force = false) {
@@ -184,7 +193,21 @@
           : null);
     }
 
+    #choiceCard(item) {
+      const { choice } = item;
+      const decide = (value) => {
+        this.approvals = this.approvals.filter((a) => a !== item);
+        item.resolve(value);
+        this.render(true);
+      };
+      return h('div', { class: 'card' },
+        h('strong', {}, choice.title),
+        (choice.lines ?? []).map((line) => h('div', { class: 'size' }, line)),
+        h('div', { class: 'row' }, choice.options.map((o) => h('button', { class: o.cls ?? '', onclick: () => decide(o.value) }, o.label))));
+    }
+
     #approvalCard(item) {
+      if (item.choice) return this.#choiceCard(item);
       const { call } = item;
       const decide = (value) => {
         this.approvals = this.approvals.filter((a) => a !== item);
