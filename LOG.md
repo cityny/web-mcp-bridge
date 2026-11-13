@@ -252,3 +252,6 @@
 - El cerrojo anti-duplicado propio de DeepSeek (`deepseek.js`) también descartaba en silencio: ahora pregunta igual, y lo que el usuario aprueba (`forced`) lo salta.
 - El freno de bucles (3.ª repetición seguida) sigue igual.
 - Prueba nueva `tests/browser/test_repetida.mjs`: primera vez se ejecuta sola; repintada en otro elemento → pregunta y no se ejecuta; Ejecutar → se repite; mismo mensaje → no pregunta; Ignorar → no se ejecuta.
+
+## 2026-11-13 — Claude (asistente de desarrollo) · Rótulos de llamadas «descartadas»
+- El registro mostraba «Llamada descartada» para `reason: duplicate, seenHere: true`, que es la web volviendo a pintar el MISMO mensaje cuya llamada ya se ejecutó (no una orden perdida). Ahora dice «Ya ejecutada: la web volvió a mostrar el mismo mensaje»; las repetidas de verdad, «Llamada idéntica a una anterior: se te pregunta» (PR #15), y las antiguas, «Llamada antigua».
