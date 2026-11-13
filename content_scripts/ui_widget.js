@@ -120,6 +120,15 @@
       });
     }
 
+    /** Retira sin respuesta (resuelve `null`) las preguntas abiertas con esa etiqueta. */
+    dismissChoices(tag) {
+      const stale = this.approvals.filter((a) => a.choice?.tag === tag);
+      if (!stale.length) return;
+      this.approvals = this.approvals.filter((a) => !stale.includes(a));
+      stale.forEach((a) => a.resolve(null));
+      this.render(true);
+    }
+
     // ───────────── Render ─────────────
 
     render(force = false) {

@@ -245,3 +245,10 @@
 - Si una llamada falla, el error va con la ficha de esa herramienta para que la IA se corrija sola.
 - `ayuda` se marca como entregada (si no, el vigilante de llamadas no ejecutadas la reintentaría).
 - `npm test` volvía a fallar por `tests/test_repo_mcp.py` (trasladado a mis-mcp en el PR #11): quitado del script.
+
+## 2026-11-13 — Claude (asistente de desarrollo) · Llamadas repetidas: pregunta el usuario
+- Registro real: tras enviar un mensaje en un chat abierto, el escáner volvía a ver la respuesta ANTERIOR (repintada) y avisaba «Llamada repetida ignorada (textos)», aunque la llamada nueva sí se ejecutó después. El usuario pidió que una repetida nunca se descarte en silencio: debe preguntar.
+- Ahora una llamada idéntica a una ya ejecutada que no es el repintado del mismo mensaje que la lanzó muestra una tarjeta «Llamada idéntica a una ya ejecutada · ¿La ejecuto otra vez?» con Ejecutar / Ignorar (una pregunta por mensaje). Se retira sola si la IA empieza otra respuesta o llega otra llamada.
+- El cerrojo anti-duplicado propio de DeepSeek (`deepseek.js`) también descartaba en silencio: ahora pregunta igual, y lo que el usuario aprueba (`forced`) lo salta.
+- El freno de bucles (3.ª repetición seguida) sigue igual.
+- Prueba nueva `tests/browser/test_repetida.mjs`: primera vez se ejecuta sola; repintada en otro elemento → pregunta y no se ejecuta; Ejecutar → se repite; mismo mensaje → no pregunta; Ignorar → no se ejecuta.
