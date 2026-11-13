@@ -21,7 +21,8 @@ const tools = [
 const prompt = WMB.buildSystemPrompt(tools);
 assert.match(prompt, /### `demo` \(Demo\)/);
 assert.match(prompt, /- sumar\(a: number, modo\?: "x"\|"y", extra\?: string\[\] = \[\]\): Suma dos números\./);
-assert.match(prompt, /· a: Primer sumando/);
+assert.ok(!prompt.includes('Primer sumando'), 'el detalle de cada parámetro no va en el catálogo: lo da `ayuda`');
+assert.match(prompt, /"ayuda"/, 'el prompt explica cómo pedir la ficha completa');
 assert.ok(!prompt.includes('$schema') && !prompt.includes('sumarArguments'), 'las herramientas van como firmas compactas, no como JSON Schema');
 assert.match(prompt, /"mcp_call"/);
 assert.ok(prompt.startsWith(`[WMB:${WMB.toolsSignature(tools)}]`), 'debe empezar con el marcador');
@@ -29,6 +30,39 @@ assert.match(prompt, /SÍ tienes acceso/);
 assert.ok(prompt.length < 1700, 'el prompt base debe ser compacto');
 assert.notEqual(WMB.toolsSignature(tools), WMB.toolsSignature([]));
 assert.match(WMB.buildSystemPrompt([]), /Ningún servidor MCP activo/);
+
+// Por niveles: catálogo con la primera frase; guía y ficha completa con `wmb.ayuda`
+assert.equal(WMB.firstSentence('Hace A. Luego B y C.'), 'Hace A.');
+assert.equal(WMB.firstSentence('Sin punto final'), 'Sin punto final');
+assert.ok(WMB.firstSentence('x'.repeat(500)).length <= 170);
+assert.equal(WMB.firstSentence('Usa p. ej. esto.'), 'Usa p.', 'documentado: «p. ej.» corta la frase (los MCP lo evitan en la primera frase)');
+const cad = [
+  { server: 'autocad-mcp', name: 'panorama', description: 'EMPIEZA AQUÍ: qué hay y dónde. Devuelve capas, rejilla y textos con su celda.',
+    serverInstructions: 'Control de AutoCAD. Empieza siempre con panorama y trabaja por zonas.',
+    inputSchema: { type: 'object', properties: { zona: { type: 'array', description: 'Rectángulo [[x1,y1],[x2,y2]]' } } } },
+  { server: 'autocad-mcp', name: 'lisp', description: 'Último recurso, solo expresiones cortas. Detalle muy largo que no debe ir al catálogo.',
+    serverInstructions: 'Control de AutoCAD. Empieza siempre con panorama y trabaja por zonas.',
+    inputSchema: { type: 'object', required: ['expresion'], properties: { expresion: { type: 'string', description: 'Código AutoLISP' } } } },
+];
+const catalogo = WMB.buildSystemPrompt(cad);
+assert.match(catalogo, /Guía: Control de AutoCAD\. \(completa: ayuda "autocad-mcp"\)/);
+assert.match(catalogo, /- lisp\(expresion: string\): Último recurso, solo expresiones cortas\./);
+assert.ok(!catalogo.includes('Detalle muy largo') && !catalogo.includes('Código AutoLISP'));
+// Firmas del catálogo compactas (sin «|null = null» en opcionales); la ficha conserva la firma completa
+const capa = [{ server: 's', name: 'capa', description: 'Cambia una capa.', inputSchema: { type: 'object', required: ['nombre'],
+  properties: { nombre: { type: 'string' }, color: { anyOf: [{ type: 'integer' }, { type: 'null' }], default: null }, activar: { type: 'boolean', default: false } } } }];
+assert.match(WMB.buildSystemPrompt(capa), /- capa\(nombre: string, color\?: number, activar\?: boolean = false\): Cambia una capa\./);
+assert.match(WMB.toolHelp(capa, 's', 'capa'), /color\?: integer\|null = null/);
+const guia = WMB.toolHelp(cad, 'autocad-mcp');
+assert.match(guia, /Empieza siempre con panorama y trabaja por zonas/);
+assert.match(guia, /- lisp: Último recurso/);
+const ficha = WMB.toolHelp(cad, 'AutoCAD_MCP', 'LISP');                       // sin distinguir mayúsculas ni guiones
+assert.match(ficha, /Detalle muy largo/);
+assert.match(ficha, /- expresion \(obligatorio\): string — Código AutoLISP/);
+assert.match(WMB.toolHelp(cad, 'otro'), /Servidores: autocad-mcp/);
+assert.match(WMB.toolHelp(cad, 'autocad-mcp', 'nada'), /Tiene: panorama, lisp/);
+assert.match(WMB.helpOnError(cad, 'autocad-mcp', 'lisp'), /Ficha de autocad-mcp\.lisp/);
+assert.equal(WMB.helpOnError(cad, 'autocad-mcp', 'nada'), '');
 
 // Recordatorio de una línea para que la IA no olvide sus herramientas
 const line = WMB.reminderLine([{ server: 'astrax_mcp' }, { server: 'astrax_mcp' }]);

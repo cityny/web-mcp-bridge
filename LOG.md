@@ -232,3 +232,11 @@
 - El puente y la extensión no cambian: siguen tratando de forma genérica cualquier MCP con `sync_check`/`sync_apply`. INSTALL.md lo explica.
 - Antes se une `fix/archivos-grandes` a `main` (14 commits, avance rápido), para que la actualización automática vuelva a seguir la versión que se usa.
 - Pruebas: `npm test` OK; `test_bridge*.py` y `test_mcp_ctl.py` OK (con `websockets` instalado).
+
+## 2026-11-14 — Claude (asistente de desarrollo) · Contexto por niveles (idea de Isabel)
+- Medido con las herramientas reales de AutoCAD: el prompt ocupaba 11.668 caracteres solo para ese MCP, se reenvía cada pocos mensajes, cortaba 9 descripciones a 400 caracteres y NO incluía las instrucciones del servidor (ahí está el flujo de trabajo).
+- Nivel 0 (siempre): catálogo con la firma compacta y la primera frase de cada herramienta, y la primera frase de la guía de cada servidor. AutoCAD: 6.999 caracteres (−40 %).
+- Nivel 1 (bajo demanda): herramienta virtual `wmb.ayuda(servidor, herramienta?)`, que responde la propia extensión: guía completa del servidor (sus `instructions`, que ahora se guardan del `initialize`) o ficha completa de una herramienta.
+- Si una llamada falla, el error va con la ficha de esa herramienta para que la IA se corrija sola.
+- `ayuda` se marca como entregada (si no, el vigilante de llamadas no ejecutadas la reintentaría).
+- `npm test` volvía a fallar por `tests/test_repo_mcp.py` (trasladado a mis-mcp en el PR #11): quitado del script.

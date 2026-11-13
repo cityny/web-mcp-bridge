@@ -225,6 +225,16 @@
     if (!state.settings.bridgeEnabled) { audit('warn', 'call.ignored', { reason: 'bridge_off', tool: call.name }); widget.log('err', `Llamada no ejecutada (${call.name}): el puente está apagado.`); return; }
     if (!platformOn()) { audit('warn', 'call.ignored', { reason: 'platform_off', tool: call.name }); widget.log('err', `Llamada no ejecutada (${call.name}): esta web está desactivada en la extensión.`); return; }
     audit('info', 'call.detected', { server: call.server, tool: call.name, args: JSON.stringify(call.arguments ?? {}) });
+    // `wmb.ayuda`: guía de un servidor o ficha completa de una herramienta. La responde la extensión (sin MCP).
+    if (String(call.server ?? '').toLowerCase() === WMB.HELP_SERVER && String(call.name ?? '').toLowerCase() === 'ayuda') {
+      const a = call.arguments ?? {};
+      const text = WMB.toolHelp(state.tools, a.servidor ?? a.server, a.herramienta ?? a.tool);
+      audit('info', 'call.help', { servidor: a.servidor ?? a.server ?? null, herramienta: a.herramienta ?? a.tool ?? null, chars: text.length });
+      widget.log('ok', `Ayuda: ${a.servidor ?? a.server ?? ''}${a.herramienta ?? a.tool ? ` › ${a.herramienta ?? a.tool}` : ''}`);
+      if (currentId) { const t = tracked.get(currentId); if (t) t.state = 'delivered'; } // si no, se reintentaría
+      await guarded(deliver({ slug: WMB.HELP_SERVER }, call, { status: 'ok', text }), DELIVER_TIMEOUT_MS, 'El chat no aceptó el resultado a tiempo.');
+      return;
+    }
     const { srv, tool } = await resolveCall(call);
     audit('info', 'call.resolved', { server: srv?.slug ?? call.server ?? null, tool: call.name, serverFound: Boolean(srv), toolFound: Boolean(tool) });
 
@@ -242,7 +252,7 @@
       widget.log('err', `Bloqueada: ${srv.slug} › ${call.name}`);
     } else if (!tool) {
       const available = state.tools.filter((t) => t.server === srv.slug).map((t) => t.name).join(', ');
-      result = { status: 'error', text: `La herramienta «${call.name}» no existe en «${srv.slug}». Disponibles: ${available || 'ninguna'}.` };
+      result = { status: 'error', text: `La herramienta «${call.name}» no existe en «${srv.slug}». Disponibles: ${available || 'ninguna'}. Guía: ayuda con "servidor":"${srv.slug}".` };
     } else {
       let approved = true;
       const sig = `${srv.slug}|${call.name}|${JSON.stringify(call.arguments ?? {})}`;
@@ -290,6 +300,11 @@
         }
         if (!response?.ok) result = { status: 'error', text: response?.error ?? 'Error desconocido.' };
         else result = { status: response.result?.isError ? 'error' : 'ok', raw: response.result };
+        if (result.status === 'error') { // la ficha de la herramienta ayuda a la IA a corregir la llamada
+          const ficha = WMB.helpOnError(state.tools, srv.slug, call.name);
+          if (ficha && Array.isArray(result.raw?.content)) result.raw = { ...result.raw, content: [...result.raw.content, { type: 'text', text: ficha }] };
+          else if (ficha) result.text = `${result.text ?? ''}${ficha}`;
+        }
         brake.fails[srv.slug] = result.status === 'ok' ? 0 : fails + 1;
         const errorText = result.status === 'ok' ? undefined : String(result.text ?? (result.raw?.content ?? []).filter((c) => c.type === 'text').map((c) => c.text).join(' ')).slice(0, 200);
         audit(result.status === 'ok' ? 'info' : 'warn', 'call.exec.end', { server: srv.slug, tool: call.name, status: result.status, ms: Date.now() - execAt, error: errorText });

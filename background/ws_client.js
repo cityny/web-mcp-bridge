@@ -163,6 +163,7 @@ export class McpConnection {
       clientInfo: { name: 'web-mcp-bridge', version: '1.2.0' },
     });
     this.serverInfo = init?.serverInfo ?? null;
+    this.instructions = typeof init?.instructions === 'string' ? init.instructions : '';
     this.notify('notifications/initialized');
     await this.refreshTools();
 
