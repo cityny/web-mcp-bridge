@@ -169,6 +169,13 @@ def uninstall_linux(dry: bool) -> None:
 # ───────────────────────── Principal ─────────────────────────
 
 def main() -> int:
+    # La tarea programada de Windows (update.ps1) ejecuta esto con la consola en cp1252: sin esto,
+    # imprimir «✔» rompía el script DESPUÉS de reiniciar el puente y dejaba un traceback en update.log.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="replace")
+        except (AttributeError, ValueError):
+            pass
     parser = argparse.ArgumentParser(description="Instala el puente MCP como servicio de inicio automático.")
     parser.add_argument("--uninstall", action="store_true", help="Quita el arranque automático")
     parser.add_argument("--dry-run", action="store_true", help="Muestra los pasos sin ejecutarlos")
