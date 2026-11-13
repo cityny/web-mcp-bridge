@@ -99,9 +99,22 @@
   adapter.trace = (event, details, level = 'info') => {
     audit(level, event, details);
     // Una llamada de la última respuesta descartada como «duplicada» que no se lanzó desde ese mensaje: la IA puede quedarse esperando.
-    if (event === 'call.skipped' && details?.reason === 'duplicate' && details.lastMessage && !details.seenHere && !currentCid) {
-      widget.log('err', `Llamada repetida ignorada (${details.tool}). Si la IA se quedó esperando, pídele que la repita.`);
-    }
+    // La IA empezó otra respuesta o llegó otra llamada: la pregunta de «¿repetir?» ya no tiene sentido.
+    if (event === 'ai.streaming' || event === 'call.detected') widget.dismissChoices('repetida');
+  };
+  // Llamada idéntica a una ya ejecutada: se pregunta (el usuario decide desde el chat si se repite).
+  adapter.onDuplicate = async ({ call }) => {
+    widget.dismissChoices('repetida');
+    let args = JSON.stringify(call.arguments ?? {});
+    if (args.length > 300) args = `${args.slice(0, 300)}…`;
+    const answer = await widget.requestChoice({
+      tag: 'repetida',
+      title: 'Llamada idéntica a una ya ejecutada',
+      lines: [`${call.server ?? '?'} › ${call.name ?? '?'}`, args, '¿La ejecuto otra vez?'],
+      options: [{ value: 'run', label: 'Ejecutar', cls: 'primary' }, { value: 'skip', label: 'Ignorar' }],
+    });
+    audit('info', 'call.duplicate_choice', { server: call.server, tool: call.name, answer: answer ?? 'dismissed' });
+    return answer === 'run';
   };
   audit('info', 'chat.start', { adapter: adapter.name, path: location.pathname });
 
@@ -230,6 +243,7 @@
     if (!state.settings.bridgeEnabled) { audit('warn', 'call.ignored', { reason: 'bridge_off', tool: call.name }); widget.log('err', `Llamada no ejecutada (${call.name}): el puente está apagado.`); return; }
     if (!platformOn()) { audit('warn', 'call.ignored', { reason: 'platform_off', tool: call.name }); widget.log('err', `Llamada no ejecutada (${call.name}): esta web está desactivada en la extensión.`); return; }
     audit('info', 'call.detected', { server: call.server, tool: call.name, args: JSON.stringify(call.arguments ?? {}) });
+    widget.dismissChoices('repetida'); // llegó otra llamada: la pregunta pendiente de «¿repetir?» ya no aplica
     // `wmb.ayuda`: guía de un servidor o ficha completa de una herramienta. La responde la extensión (sin MCP).
     if (String(call.server ?? '').toLowerCase() === WMB.HELP_SERVER && String(call.name ?? '').toLowerCase() === 'ayuda') {
       const a = call.arguments ?? {};

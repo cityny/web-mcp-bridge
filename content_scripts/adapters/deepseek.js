@@ -208,7 +208,12 @@
     observeResponses(callback, options) {
       return super.observeResponses((detected) => {
         const hash = hashOf(detected.call);
-        if (this.#locked(hash)) { this.debug?.('ok', 'DeepSeek · llamada idéntica ya en curso: ignorada'); return; }
+        // Idéntica a la que se acaba de lanzar: no se repite sola, pero tampoco se descarta en silencio: decide el usuario.
+        if (!detected.forced && this.#locked(hash)) {
+          this.trace('call.skipped', { reason: 'locked', server: detected.call.server, tool: detected.call.name });
+          this.onDuplicate?.(detected).then((run) => { if (run) callback({ ...detected, forced: true }); });
+          return;
+        }
         this.#lock = { hash, firedAt: Date.now(), sentAt: 0, newGen: false };
         callback(detected);
       }, options);

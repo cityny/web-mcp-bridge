@@ -42,6 +42,7 @@
       this.retries = new Map();        // id → reintentos de una llamada que no llegó a ejecutarse
       this.liveEls = new WeakSet();    // respuestas que vimos generarse en vivo en esta pestaña (no son un repintado)
       this.seenOn = new WeakMap();     // mensaje (elemento) → ids que ya lanzó
+      this.askedOn = new WeakMap();    // mensaje (elemento) → ids repetidos por los que ya se preguntó al usuario
       this.trace = () => {}; // core_bridge lo conecta al registro de auditoría: trace(evento, detalles, nivel)
       this.lastActivity = 0;
       this.freshChat = false;
@@ -186,11 +187,28 @@
               }
             }
             if (known) {
+              const seenHere = Boolean(this.seenOn.get(element)?.has(id));
               if (!baseline && !traced.has(id)) {
                 traced.add(id);
                 this.trace('call.skipped', {
                   reason: 'duplicate', server: call.server, tool: call.name, lastMessage: i === last,
-                  seenHere: Boolean(this.seenOn.get(element)?.has(id)), knownBefore: this.rememberedInfo.has(id),
+                  seenHere, knownBefore: this.rememberedInfo.has(id),
+                });
+              }
+              // Idéntica a una ya ejecutada pero NO es un repintado del mensaje que la lanzó: decide el usuario, no la extensión
+              // (una sola pregunta por mensaje).
+              const asked = this.askedOn.get(element) ?? new Set();
+              if (!baseline && i === last && n === 0 && !seenHere && !asked.has(id) && this.onDuplicate) {
+                asked.add(id);
+                this.askedOn.set(element, asked);
+                this.onDuplicate({ id, call }).then((run) => {
+                  if (!run) return;
+                  const launched = this.seenOn.get(element) ?? new Set();
+                  launched.add(id);
+                  this.seenOn.set(element, launched);
+                  this.rememberedInfo.set(id, { count: messages.length, text, at: Date.now(), el: element });
+                  this.trace('call.repeated', { server: call.server, tool: call.name, reason: 'el usuario eligió ejecutarla de nuevo' });
+                  callback({ id, call, element, forced: true });
                 });
               }
               return;
