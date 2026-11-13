@@ -226,3 +226,9 @@
   - **Herramientas por MCP**: casillas, buscador y «Todas/Ninguna» (o «Activar/Desactivar estas» con filtro). `server.disabledTools`: no se describen a la IA, no cuentan en los tokens y `CALL_TOOL` las rechaza. Mutación `SET_TOOLS_ENABLED`.
   - **Capturas en DeepSeek**: `acceptsImages = false` en el adaptador. Las imágenes del resultado se sustituyen por una nota que orienta a la IA a herramientas de datos (evento `result.image_skipped`). El resto de plataformas sigue adjuntándolas.
 - Pruebas: `test_background` (herramienta desactivada invisible y rechazada; plataformas completadas en ajustes antiguos), `test_freno.mjs` (captura en DeepSeek → nota de texto) y revisión visual en Chromium.
+
+## 2026-11-13 — Claude (asistente de desarrollo) · repo-github sale del puente
+- `server/repo_mcp.py`, `server/repos.example.json` y `tests/test_repo_mcp.py` se trasladan al repositorio privado de MCP propios (`repo-github/`), donde están los otros MCP de Isabel. Motivo: este repo es un fork público y el puente no debe mezclar MCP concretos con su código.
+- El puente y la extensión no cambian: siguen tratando de forma genérica cualquier MCP con `sync_check`/`sync_apply`. INSTALL.md lo explica.
+- Antes se une `fix/archivos-grandes` a `main` (14 commits, avance rápido), para que la actualización automática vuelva a seguir la versión que se usa.
+- Pruebas: `npm test` OK; `test_bridge*.py` y `test_mcp_ctl.py` OK (con `websockets` instalado).

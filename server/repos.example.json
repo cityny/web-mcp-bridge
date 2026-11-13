@@ -1,7 +1,0 @@
-{
-  "workspace": "C:/Users/TU USUARIO/repos",
-  "repos": {
-    "usuario/repositorio": "PEGA_AQUI_EL_TOKEN",
-    "usuario/otro-repo": { "token": "PEGA_AQUI_OTRO_TOKEN" }
-  }
-}

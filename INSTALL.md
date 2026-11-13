@@ -125,10 +125,8 @@ Después quita la extensión en `chrome://extensions`.
 
 ## Repos de GitHub (repo-github)
 
-`server\repo_mcp.py` es un MCP para editar repos de GitHub: archivos (con `append_file` para archivos grandes por trozos), git y la API de GitHub.
+El MCP `repo-github` (archivos, git y API de GitHub para varios repos) vive ahora en un repositorio aparte, junto con los demás MCP propios. El puente lo lanza como cualquier otro MCP desde `server\servers.json`, por ejemplo: `{"repo-github": {"command": "py", "args": ["C:/ruta/repo-github/repo_mcp.py"], "port": 8793}}`.
 
-1. Copia `server\repos.example.json` como `server\repos.json` y pon cada repo con su token (permiso *Contents: read and write*). Los repos se clonan solos en `workspace`. `repos.json` no se sube a git.
-2. Añádelo en `server\servers.json`: `{"repo-github": {"command": "py", "args": ["C:/ruta/web-mcp-bridge/server/repo_mcp.py"], "port": 8793}}`.
-3. Añadir otro repo = una línea nueva en `repos.json` (sin reiniciar).
+La extensión trata de forma especial a cualquier MCP que ofrezca la herramienta `sync_check` (y `sync_apply`):
 
 **Sincronización:** antes de trabajar con un repo, la extensión consulta GitHub. Si solo cambió GitHub, actualiza la copia local y se lo cuenta a la IA. Si cambiaron GitHub y lo local, te pregunta qué conservar (*Usar GitHub* guarda un respaldo de lo local; *Mantener lo local* mezcla lo nuevo). Se repite cada 10 minutos y siempre antes de `git_commit` y `git_push`.
