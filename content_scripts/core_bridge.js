@@ -122,7 +122,11 @@
     state.settings = snapshot.settings;
     state.servers = snapshot.servers.filter((s) => s.enabled && s.url);
     state.tools = active.tools;
-    adapter.configure({ focusFallback: state.settings.focusFallback !== false });
+    adapter.configure({
+      focusFallback: state.settings.focusFallback !== false,
+      minSendIntervalSec: Number(state.settings.minSendIntervalSec ?? 5),
+      maxSendsPerMinute: Number(state.settings.maxSendsPerMinute ?? 8),
+    });
     const host = document.getElementById('wmb-host');
     if (host) host.style.display = platformOn() ? '' : 'none'; // plataforma desactivada: ni panel ni acciones
     widget.update({
@@ -198,6 +202,7 @@
     const sent = await adapter.sendToolResult(`${plan.build(attached)}${tail}`, { autoSend, settleMs: attached && plan.files.length ? 1500 : 0 });
     audit(sent.ok ? 'info' : 'error', 'result.delivered', {
       server: srv.slug, tool: call.name, status, ok: sent.ok, error: sent.error, files: plan.files.length, attached,
+      ...(sent.reintentos ? { rate_limit_retries: sent.reintentos } : {}),
     });
     widget.log(sent.ok ? 'ok' : 'err', sent.ok ? `Resultado enviado a ${adapter.name}.` : sent.error);
     if (sent.ok) watchAi();

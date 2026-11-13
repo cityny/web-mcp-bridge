@@ -110,4 +110,25 @@ assert.match(plan.build(true), /contenido COMPLETO en el archivo adjunto s_t_com
 assert.ok(plan.build(false).includes(long), 'sin adjunto, el texto completo va en línea');
 assert.equal(WMB.planResult({ content: [{ type: 'text', text: 'corto' }] }, { server: 's', name: 't', status: 'ok' }).files.length, 0);
 
+// Ritmo de envío («Messages too frequent»)
+{
+  const sinAzar = () => 0, maxAzar = () => 1;
+  assert.equal(WMB.sendWait([], 100_000, { minSec: 5, perMin: 8 }), 0, 'primer envío: sin espera');
+  assert.equal(WMB.sendWait([98_000], 100_000, { minSec: 5 }, sinAzar), 3000, 'faltan 3 s para los 5 s mínimos');
+  assert.equal(WMB.sendWait([98_000], 100_000, { minSec: 5 }, maxAzar), 5500, 'con azar máximo: 7,5 s desde el último');
+  assert.equal(WMB.sendWait([90_000], 100_000, { minSec: 5 }, maxAzar), 0, 'ya pasó el tiempo');
+  assert.equal(WMB.sendWait([98_000], 100_000, { minSec: 0 }), 0, '0 = sin pausa');
+  const ocho = [50_000, 55_000, 60_000, 65_000, 70_000, 75_000, 80_000, 85_000];
+  assert.equal(WMB.sendWait(ocho, 100_000, { minSec: 0, perMin: 8 }), 10_500, 'tope por minuto: espera a que salga el más antiguo');
+  assert.equal(WMB.sendWait(ocho, 100_000, { minSec: 0, perMin: 0 }), 0, '0 = sin tope');
+  assert.equal(WMB.sendWait([10_000, 20_000], 100_000, { minSec: 0, perMin: 2 }), 0, 'los envíos de hace más de un minuto no cuentan');
+  assert.equal(WMB.backoffMs(0, sinAzar), 20_000);
+  assert.equal(WMB.backoffMs(2, sinAzar), 80_000);
+  assert.ok(WMB.backoffMs(1, maxAzar) === 52_000);
+  for (const aviso of ['Messages too frequent. Try again later.', 'Too many requests', 'Demasiados mensajes, inténtalo más tarde', 'Rate limit exceeded']) {
+    assert.ok(WMB.RATE_LIMIT_RE.test(aviso), aviso);
+  }
+  for (const normal of ['Mensaje enviado', 'El servidor respondió OK', 'frequently asked questions']) assert.ok(!WMB.RATE_LIMIT_RE.test(normal), normal);
+}
+
 console.log('✔ test_utils: todo correcto');

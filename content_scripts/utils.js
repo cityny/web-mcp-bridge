@@ -17,6 +17,31 @@
   /** ¿La pestaña está oculta, tapada por otra ventana o sin foco? Ahí Chrome/Brave frenan los temporizadores de la página. */
   WMB.isBackground = () => typeof document !== 'undefined' && (document.hidden || !document.hasFocus());
 
+  // ───── Ritmo de envío: los chats limitan los mensajes muy seguidos («Messages too frequent») ─────
+
+  /** Avisos de «demasiados mensajes» de los chats (inglés y español). */
+  WMB.RATE_LIMIT_RE = /too frequent|too many (requests|messages)|try again later|rate.?limit|demasiad[oa]s? (mensajes|solicitudes|peticiones)|int[ée]ntalo (de nuevo )?m[áa]s tarde|vuelve a intentarlo m[áa]s tarde/i;
+
+  /**
+   * Milisegundos que hay que esperar antes del siguiente envío automático para respetar:
+   * - `minSec` segundos desde el último envío, más un margen aleatorio de hasta el 50 % (parece menos un robot);
+   * - como mucho `perMin` envíos en los últimos 60 s (0 = sin límite).
+   * @param {number[]} times instantes (ms) de los envíos anteriores
+   */
+  WMB.sendWait = (times, now, { minSec = 0, perMin = 0 } = {}, rand = Math.random) => {
+    let wait = 0;
+    const last = times.length ? Math.max(...times) : 0;
+    if (minSec > 0 && last) wait = Math.max(wait, last + minSec * 1000 * (1 + 0.5 * rand()) - now);
+    if (perMin > 0) {
+      const recent = times.filter((t) => now - t < 60_000).sort((a, b) => a - b);
+      if (recent.length >= perMin) wait = Math.max(wait, recent[recent.length - perMin] + 60_000 - now + 500);
+    }
+    return Math.max(0, Math.round(wait));
+  };
+
+  /** Espera tras un aviso de «demasiados mensajes»: ~20 s, 40 s, 80 s… con un 30 % de azar. */
+  WMB.backoffMs = (attempt, rand = Math.random) => Math.round(20_000 * 2 ** attempt * (1 + 0.3 * rand()));
+
   /**
    * Pausa que NO se congela en segundo plano: con la pestaña oculta, el temporizador lo cuenta el service worker
    * (los setTimeout de una pestaña oculta se frenan a 1 s y, tras 5 min, a 1 por minuto). Si falla, usa setTimeout.
