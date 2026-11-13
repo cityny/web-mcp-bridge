@@ -46,7 +46,8 @@
       this.lastActivity = 0;
       this.freshChat = false;
       this.awaitingSince = 0;   // momento en que se envió algo y se espera una respuesta nueva
-      this.options = { focusFallback: true };
+      this.options = { focusFallback: true, minSendIntervalSec: 5, maxSendsPerMinute: 8 };
+      this.sendTimes = [];              // envíos automáticos recientes (ritmo de envío)
       this.rescan = () => {};
     }
 
@@ -328,6 +329,16 @@
      * @param {{autoSend?:boolean, settleMs?:number}} options `settleMs`: espera a que termine de subirse un adjunto
      */
     async sendToolResult(text, { autoSend = true, settleMs = 0 } = {}) {
+      // Ritmo: los chats rechazan mensajes muy seguidos («Messages too frequent. Try again later.»).
+      const wait = autoSend ? WMB.sendWait([...this.sendTimes, this.lastSendAt].filter(Boolean), Date.now(), {
+        minSec: this.options.minSendIntervalSec, perMin: this.options.maxSendsPerMinute }) : 0;
+      if (wait > 0) {
+        this.debug?.('ok', `Esperando ${Math.ceil(wait / 1000)} s antes de enviar (para no mandar mensajes demasiado seguidos).`);
+        await WMB.sleep(wait);
+      }
+      // En DeepSeek el aviso queda en el chat, debajo de nuestro mensaje, y la página se repinta a menudo: se cuenta
+      // CUÁNTOS avisos hay (un repintado no cambia la cantidad; un aviso nuevo, sí).
+      let avisos = this.rateLimitNotices(text).length;
       const composer = await WMB.waitFor(() => this.getComposer(), { timeout: 5000 });
       if (!composer) return { ok: false, error: 'No se encontró el cuadro de texto del chat.' };
       this.lastActivity = Date.now();
@@ -347,7 +358,50 @@
         if (token?.prev) WMB.bg({ type: 'RESTORE_FOCUS', prev: token.prev });
       }
       if (sent) { this.awaitingSince = Date.now(); this.lastSendAt = this.awaitingSince; }
-      return sent ? { ok: true } : { ok: false, error: 'No se pudo confirmar el envío al chat. Pulsa Enter en el chat.' };
+      let reintentos = 0;
+      // Si el chat responde «demasiados mensajes», se espera cada vez más y se reenvía (hasta 3 veces).
+      while (sent && reintentos < 3) {
+        const aviso = await WMB.waitFor(() => { const v = this.rateLimitNotices(text); return v.length > avisos ? v.at(-1) : null; },
+          { timeout: 2500, interval: 300 });
+        if (!aviso) break;
+        avisos = this.rateLimitNotices(text).length;
+        const pausa = WMB.backoffMs(reintentos);
+        reintentos += 1;
+        this.debug?.('err', `${this.name}: «${(aviso.textContent || '').trim().slice(0, 80)}». Reintento ${reintentos}/3 en ${Math.round(pausa / 1000)} s.`);
+        await WMB.sleep(pausa);
+        const box = this.getComposer();
+        if (box && WMB.dom.getText(box).trim().length < 10) await WMB.dom.setText(box, text, { append: true }); // el mensaje se perdió: se vuelve a escribir
+        sent = await attempt(4000);
+        if (sent) { this.awaitingSince = Date.now(); this.lastSendAt = this.awaitingSince; }
+      }
+      if (sent) this.sendTimes = [...this.sendTimes.filter((t) => Date.now() - t < 60_000), Date.now()];
+      if (sent && reintentos && await WMB.waitFor(() => this.rateLimitNotices(text).length > avisos, { timeout: 2500, interval: 300 })) {
+        return { ok: false, error: `${this.name} sigue diciendo que hay demasiados mensajes. Espera un minuto y pulsa Enter en el chat.` };
+      }
+      return sent
+        ? { ok: true, ...(reintentos ? { reintentos } : {}) }
+        : { ok: false, error: 'No se pudo confirmar el envío al chat. Pulsa Enter en el chat.' };
+    }
+
+    /**
+     * Avisos visibles de «demasiados mensajes» (notificación flotante o mensaje de error en el chat). Recorre solo
+     * los nodos de texto (rápido) y devuelve el elemento corto que contiene cada aviso.
+     */
+    rateLimitNotices(ownText = '') {
+      const found = [];
+      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        const value = (node.nodeValue || '').trim();
+        // Solo avisos cortos y sueltos (una notificación o un error de una línea), nunca frases dentro de un texto
+        // largo ni el propio resultado que acabamos de enviar (podría contener «inténtalo más tarde»).
+        if (!value || value.length > 120 || !WMB.RATE_LIMIT_RE.test(value)) continue;
+        if (ownText && ownText.includes(value)) continue;
+        const el = node.parentElement;
+        if (!el || (el.textContent || '').length > 160 || el.offsetParent === null) continue;
+        if (el.closest('[contenteditable="true"], textarea') || found.includes(el)) continue;
+        found.push(el);
+      }
+      return found;
     }
 
     /** El chat aceptó el mensaje: el cuadro de texto se vació o ya está generando la respuesta. */

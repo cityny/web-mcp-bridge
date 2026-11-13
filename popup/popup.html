@@ -175,6 +175,16 @@
         <input type="number" id="set-maxResultChars" min="500" max="100000" step="500">
       </label>
       <label class="setting column">
+        <strong>Pausa mínima entre envíos al chat (segundos)</strong>
+        <small>Evita el aviso «Messages too frequent» de DeepSeek y otros chats. Se suma hasta un 50 % al azar. 0 = sin pausa.</small>
+        <input type="number" id="set-minSendIntervalSec" min="0" max="120" step="1">
+      </label>
+      <label class="setting column">
+        <strong>Máximo de envíos al chat por minuto</strong>
+        <small>Si se llega al tope, espera antes de enviar el siguiente resultado. 0 = sin límite.</small>
+        <input type="number" id="set-maxSendsPerMinute" min="0" max="60" step="1">
+      </label>
+      <label class="setting column">
         <strong>Tiempo máximo por herramienta (segundos)</strong>
         <small>Operaciones grandes (p. ej. borrar o copiar miles de entidades en AutoCAD) pueden tardar minutos. Entre 10 y 1800.</small>
         <input type="number" id="set-toolTimeoutSec" min="10" max="1800" step="10">

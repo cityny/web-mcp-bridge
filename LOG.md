@@ -233,6 +233,11 @@
 - Antes se une `fix/archivos-grandes` a `main` (14 commits, avance rápido), para que la actualización automática vuelva a seguir la versión que se usa.
 - Pruebas: `npm test` OK; `test_bridge*.py` y `test_mcp_ctl.py` OK (con `websockets` instalado).
 
+## 2026-11-14 — Claude (asistente de desarrollo) · «Messages too frequent» en DeepSeek
+- DeepSeek rechaza mensajes muy seguidos: acepta nuestro mensaje pero deja debajo «Messages too frequent. Try again later.» y no responde (dato de Isabel). Pasaba en cadenas de herramientas rápidas.
+- Antes de cada envío automático: pausa mínima desde el último (5 s + hasta un 50 % al azar) y tope de envíos por minuto (8). Ambos en el popup.
+- Después: si aparece un aviso NUEVO de «demasiados mensajes», se espera ~20/40/80 s (±30 %) y se reenvía; tras 3 intentos se avisa al usuario. Se cuentan los avisos (no se reconocen por elemento) porque DeepSeek repinta el chat; se ignoran textos largos y el propio resultado enviado (podría contener «inténtalo más tarde»).
+- Prueba nueva `tests/browser/test_ritmo.mjs` (Chromium + DeepSeek simulado): reenvío, pausa, falso positivo, repintado y aviso persistente.
 ## 2026-11-14 — Claude (asistente de desarrollo) · Contexto por niveles (idea de Isabel)
 - Medido con las herramientas reales de AutoCAD: el prompt ocupaba 11.668 caracteres solo para ese MCP, se reenvía cada pocos mensajes, cortaba 9 descripciones a 400 caracteres y NO incluía las instrucciones del servidor (ahí está el flujo de trabajo).
 - Nivel 0 (siempre): catálogo con la firma compacta y la primera frase de cada herramienta, y la primera frase de la guía de cada servidor. AutoCAD: 6.999 caracteres (−40 %).

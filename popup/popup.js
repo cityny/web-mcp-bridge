@@ -375,6 +375,8 @@ function renderSettings(settings) {
   if (document.activeElement?.id !== 'set-maxResultChars') $('#set-maxResultChars').value = settings.maxResultChars;
   if (document.activeElement?.id !== 'set-reinjectEvery') $('#set-reinjectEvery').value = settings.reinjectEvery;
   if (document.activeElement?.id !== 'set-toolTimeoutSec') $('#set-toolTimeoutSec').value = settings.toolTimeoutSec ?? 300;
+  if (document.activeElement?.id !== 'set-minSendIntervalSec') $('#set-minSendIntervalSec').value = settings.minSendIntervalSec ?? 5;
+  if (document.activeElement?.id !== 'set-maxSendsPerMinute') $('#set-maxSendsPerMinute').value = settings.maxSendsPerMinute ?? 8;
 }
 
 function renderUpdate(update) {
@@ -460,6 +462,14 @@ for (const key of ['autoInject', 'autoSend', 'reminder', 'focusFallback', 'prefe
 $('#set-reinjectEvery').addEventListener('change', guard((e) => {
   const value = Math.min(100, Math.max(0, Math.round(Number(e.target.value)) || 0));
   return api('UPDATE_SETTINGS', { settings: { reinjectEvery: value } });
+}));
+$('#set-minSendIntervalSec').addEventListener('change', guard((e) => {
+  const value = Math.min(120, Math.max(0, Math.round(Number(e.target.value)) || 0));
+  return api('UPDATE_SETTINGS', { settings: { minSendIntervalSec: value } });
+}));
+$('#set-maxSendsPerMinute').addEventListener('change', guard((e) => {
+  const value = Math.min(60, Math.max(0, Math.round(Number(e.target.value)) || 0));
+  return api('UPDATE_SETTINGS', { settings: { maxSendsPerMinute: value } });
 }));
 $('#set-toolTimeoutSec').addEventListener('change', guard((e) => {
   const value = Math.min(1800, Math.max(10, Math.round(Number(e.target.value)) || 300));
