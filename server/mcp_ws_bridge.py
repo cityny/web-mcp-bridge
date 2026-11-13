@@ -496,6 +496,8 @@ def load_config(path: Path) -> list[ServerConfig]:
         if name in names:
             raise ValueError(f"nombre repetido: «{name}»")
         names.add(name)
+        if entry.get("disabled"):  # detenido desde mcp_ctl.py: sigue en el archivo pero no se arranca
+            continue
         if entry.get("url") and not entry.get("command"):
             url = str(entry["url"]).strip()
             if not url.startswith(("http://", "https://")):

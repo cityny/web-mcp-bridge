@@ -62,6 +62,10 @@
   const widget = new WMB.Widget({
     onInject: () => injectInstructions(),
     onRefresh: () => { adapter.rescan(); return refresh(true); },
+    onOpenLog: async () => {
+      const res = await send({ type: 'OPEN_PANEL' });
+      if (!res?.ok) widget.log('err', 'Abre el icono de la extensión → Actividad para ver el registro.');
+    },
     onToggleBridge: async (value) => {
       await send({ type: 'UPDATE_SETTINGS', settings: { bridgeEnabled: value } });
       await refresh();
@@ -74,7 +78,14 @@
   });
 
   /** Registro de auditoría (en el service worker). Nunca incluye el texto de tus mensajes. */
-  const audit = (level, event, details) => { send({ type: 'LOG', level, event, details, platform: adapter.id }); };
+  // Seguimiento de cada llamada de la IA: ¿llegó a ejecutarse y a entregarse el resultado?
+  const tracked = new Map(); // id → { state: 'queued'|'running'|'delivered'|'failed', at, tries }
+  const QUEUE_WARN_MS = 8000;
+  let currentId = ''; // id de la llamada que se está procesando
+  let currentCid = ''; // id corto de la llamada en curso: todos sus pasos lo llevan para poder seguirla de principio a fin
+  const audit = (level, event, details) => {
+    send({ type: 'LOG', level, event, details: currentCid && !details?.cid ? { cid: currentCid, ...details } : details, platform: adapter.id });
+  };
 
   // Todo lo que se muestra en el panel flotante también queda en el registro.
   const showLog = widget.log.bind(widget);
@@ -85,6 +96,13 @@
 
   // Los adaptadores pueden escribir mensajes de depuración en el panel flotante (p. ej. ChatGPT).
   adapter.debug = (kind, message) => widget.log(kind, message);
+  adapter.trace = (event, details, level = 'info') => {
+    audit(level, event, details);
+    // Una llamada de la última respuesta descartada como «duplicada» que no se lanzó desde ese mensaje: la IA puede quedarse esperando.
+    if (event === 'call.skipped' && details?.reason === 'duplicate' && details.lastMessage && !details.seenHere && !currentCid) {
+      widget.log('err', `Llamada repetida ignorada (${details.tool}). Si la IA se quedó esperando, pídele que la repita.`);
+    }
+  };
   audit('info', 'chat.start', { adapter: adapter.name, path: location.pathname });
 
   function injectionStatus() {
@@ -182,6 +200,7 @@
       server: srv.slug, tool: call.name, status, ok: sent.ok, error: sent.error, files: plan.files.length, attached,
     });
     widget.log(sent.ok ? 'ok' : 'err', sent.ok ? `Resultado enviado a ${adapter.name}.` : sent.error);
+    if (sent.ok) watchAi();
   }
 
   /** Busca el MCP y la herramienta de una llamada; si el estado local pudiera estar viejo, lo refresca una vez. */
@@ -203,18 +222,21 @@
 
   /** Procesa una llamada MCP detectada en la respuesta de la IA. */
   async function handleCall({ call }) {
-    if (!state.settings.bridgeEnabled) return; // bridge apagado: se ignoran las llamadas
-    if (!platformOn()) return; // plataforma desactivada por el usuario
+    if (!state.settings.bridgeEnabled) { audit('warn', 'call.ignored', { reason: 'bridge_off', tool: call.name }); widget.log('err', `Llamada no ejecutada (${call.name}): el puente está apagado.`); return; }
+    if (!platformOn()) { audit('warn', 'call.ignored', { reason: 'platform_off', tool: call.name }); widget.log('err', `Llamada no ejecutada (${call.name}): esta web está desactivada en la extensión.`); return; }
     audit('info', 'call.detected', { server: call.server, tool: call.name, args: JSON.stringify(call.arguments ?? {}) });
     const { srv, tool } = await resolveCall(call);
+    audit('info', 'call.resolved', { server: srv?.slug ?? call.server ?? null, tool: call.name, serverFound: Boolean(srv), toolFound: Boolean(tool) });
 
     // Llamada que no corresponde a ningún MCP activo (p. ej. la IA explicando el formato): se ignora.
     if (!srv) {
+      audit('warn', 'call.ignored', { reason: 'server_not_active', requested: call.server ?? null, active: state.servers.map((s) => s.slug) });
       widget.log('err', `Llamada ignorada: servidor «${call.server ?? '?'}» no activo.`);
       return;
     }
 
     let result;
+    let sync = {};
     if (srv.permission === 'deny') {
       result = { status: 'rejected', text: 'El usuario no permite usar este MCP.' };
       widget.log('err', `Bloqueada: ${srv.slug} › ${call.name}`);
@@ -233,9 +255,11 @@
       if (reason) audit('warn', 'call.brake', { server: srv.slug, tool: call.name, fails, repeats: brake.repeats });
 
       if (srv.permission === 'ask' || reason) {
+        const askedAt = Date.now();
+        audit('info', 'call.approval.wait', { mode: srv.permission, brake: Boolean(reason), tool: call.name, size: WMB.sizeOfArguments(call.arguments).chars });
         const answer = await widget.requestApproval({ server: srv.slug, name: call.name, arguments: call.arguments, reason });
         approved = Boolean(answer);
-        audit('info', 'call.approval', { server: srv.slug, tool: call.name, answer: answer || 'reject' });
+        audit('info', 'call.approval', { server: srv.slug, tool: call.name, answer: answer || 'reject', ms: Date.now() - askedAt });
         if (answer === 'always') {
           await send({ type: 'SET_PERMISSION', id: srv.id, permission: 'allow' });
           await refresh();
@@ -250,8 +274,13 @@
             : 'El usuario rechazó la ejecución de esta herramienta.',
         };
         widget.log('err', `Rechazada: ${srv.slug} › ${call.name}`);
+      } else if ((sync = await syncBeforeCall(srv, call)).cancel) {
+        result = { status: 'rejected', text: sync.cancel };
+        widget.log('err', `Cancelada: ${srv.slug} > ${call.name}`);
       } else {
         widget.log('ok', `Ejecutando ${srv.slug} › ${call.name}…`);
+        const execAt = Date.now();
+        audit('info', 'call.exec.start', { server: srv.slug, tool: call.name, mode: srv.permission, size: WMB.sizeOfArguments(call.arguments).chars });
         let response;
         try {
           const limit = (Math.min(1800, Math.max(10, Number(state.settings.toolTimeoutSec) || 300)) + 30) * 1000; // + margen sobre el del service worker
@@ -262,13 +291,113 @@
         if (!response?.ok) result = { status: 'error', text: response?.error ?? 'Error desconocido.' };
         else result = { status: response.result?.isError ? 'error' : 'ok', raw: response.result };
         brake.fails[srv.slug] = result.status === 'ok' ? 0 : fails + 1;
+        const errorText = result.status === 'ok' ? undefined : String(result.text ?? (result.raw?.content ?? []).filter((c) => c.type === 'text').map((c) => c.text).join(' ')).slice(0, 200);
+        audit(result.status === 'ok' ? 'info' : 'warn', 'call.exec.end', { server: srv.slug, tool: call.name, status: result.status, ms: Date.now() - execAt, error: errorText });
         widget.log(result.status === 'ok' ? 'ok' : 'err', `${call.name}: ${result.status}`);
       }
     }
+    if (sync.note && result) { // lo que cambió en GitHub se le cuenta a la IA junto con el resultado
+      if (Array.isArray(result.raw?.content)) result.raw = { ...result.raw, content: [{ type: 'text', text: sync.note }, ...result.raw.content] };
+      else result.text = `${sync.note}\n${result.text ?? ''}`.trim();
+    }
+    if (currentId) { const t = tracked.get(currentId); if (t) t.state = 'delivered'; }
+    audit('info', 'result.deliver.start', { server: srv.slug, tool: call.name, status: result.status });
     await guarded(deliver(srv, call, result), DELIVER_TIMEOUT_MS, 'El chat no aceptó el resultado a tiempo.');
   }
 
+  // ───── Sincronización con GitHub antes de tocar un repo (servidores con herramienta `sync_check`, p. ej. repo-github) ─────
+  const syncedAt = new Map(); // «servidor|repo» → ms de la última comprobación
+  const SYNC_RECHECK_MS = 10 * 60 * 1000;
+  const SYNC_ALWAYS = new Set(['git_commit', 'git_push']); // antes de confirmar o subir se vuelve a mirar siempre
+  const SYNC_SKIP = new Set(['sync_check', 'sync_apply', 'list_repos']);
+
+  async function callServer(srv, name, args) {
+    const res = await guarded(send({ type: 'CALL_TOOL', server: srv.slug, name, arguments: args }), TOOL_TIMEOUT_MS, 'El servidor tardó demasiado en responder.');
+    if (!res?.ok) throw new Error(res?.error ?? 'Error desconocido.');
+    const text = (res.result?.content ?? []).filter((c) => c.type === 'text').map((c) => c.text).join('\n');
+    if (res.result?.isError) throw new Error(text || 'Error del servidor.');
+    return text;
+  }
+
+  const fileList = (info) => (info.remoteFiles ?? []).slice(0, 12).map((f) => f.replace('\t', ' ')).join(', ') || 'sin detalle';
+
+  /** Compara GitHub con la copia local ANTES de ejecutar la llamada. Devuelve { cancel?: texto, note?: texto para la IA }. */
+  async function syncBeforeCall(srv, call) {
+    if (SYNC_SKIP.has(call.name) || !state.tools.some((t) => t.server === srv.slug && t.name === 'sync_check')) return {};
+    const repo = call.arguments?.repo;
+    const key = `${srv.slug}|${String(repo ?? '').toLowerCase()}`;
+    if (!SYNC_ALWAYS.has(call.name) && Date.now() - (syncedAt.get(key) ?? 0) < SYNC_RECHECK_MS) return {};
+    let info;
+    try {
+      info = JSON.parse(await callServer(srv, 'sync_check', repo ? { repo } : {}));
+    } catch (err) {
+      widget.log('err', `No se pudo comprobar GitHub: ${err.message}`);
+      return {};
+    }
+    syncedAt.set(key, Date.now());
+    audit('info', 'sync.check', { server: srv.slug, repo: info.repo, status: info.status, behind: info.behind, ahead: info.ahead });
+    if (info.status === 'offline') { widget.log('err', info.summary); return {}; }
+    if (info.status === 'cloned') {
+      widget.log('ok', `${info.repo}: clonado desde GitHub.`);
+      return { note: `[GitHub] ${info.repo} se clonó ahora desde GitHub: es la versión actual del remoto.` };
+    }
+    const apply = async (strategy) => callServer(srv, 'sync_apply', { repo: info.repo, strategy });
+    try {
+      if (info.status === 'behind') { // solo cambió GitHub: nada local que perder, se actualiza y se avisa a la IA
+        await apply('update');
+        widget.log('ok', `${info.repo}: actualizado con ${info.behind} commit(s) nuevo(s) de GitHub.`);
+        return { note: `[GitHub] Antes de ejecutar tu llamada se actualizó ${info.repo} con ${info.behind} commit(s) nuevo(s) hechos directamente en GitHub. Archivos: ${fileList(info)}. Commits: ${(info.remoteCommits ?? []).slice(0, 5).join('; ')}. Tenlo en cuenta: pueden contradecir lo que creías del repo.` };
+      }
+      if (info.status === 'diverged') { // cambiaron GitHub y lo local: decide el usuario
+        const answer = await widget.requestChoice({
+          title: `GitHub y tu copia local de ${info.repo} cambiaron`,
+          lines: [
+            `GitHub: ${info.behind} commit(s) nuevo(s). Archivos: ${fileList(info)}`,
+            `Local: ${(info.dirty ?? []).length} archivo(s) sin confirmar, ${info.ahead} commit(s) sin subir.`,
+            '«Usar GitHub» guarda un respaldo de lo local. «Mantener lo local» mezcla lo nuevo de GitHub y, donde choquen, gana lo local.',
+          ],
+          options: [
+            { value: 'remote', label: 'Usar GitHub', cls: 'primary' },
+            { value: 'local', label: 'Mantener lo local' },
+            { value: 'cancel', label: 'Cancelar llamada', cls: 'danger' },
+          ],
+        });
+        audit('info', 'sync.choice', { server: srv.slug, repo: info.repo, answer });
+        if (answer !== 'remote' && answer !== 'local') {
+          syncedAt.delete(key);
+          return { cancel: `El usuario canceló la llamada: GitHub y la copia local de ${info.repo} tienen cambios distintos y debe decidir cuáles conservar. Espera sus instrucciones.` };
+        }
+        const done = await apply(answer);
+        widget.log('ok', `${info.repo}: ${answer === 'remote' ? 'se usó GitHub' : 'se mantuvo lo local'}.`);
+        return { note: `[GitHub] ${info.repo} tenía cambios nuevos en GitHub y también locales; el usuario eligió ${answer === 'remote' ? 'usar la versión de GitHub' : 'mantener lo local'}. ${done} Archivos cambiados en GitHub: ${fileList(info)}.` };
+      }
+    } catch (err) {
+      widget.log('err', `No se pudo sincronizar ${info.repo}: ${err.message}`);
+      syncedAt.delete(key);
+      return { cancel: `No se ejecutó nada: no se pudo sincronizar ${info.repo} con GitHub (${err.message}). Explícaselo al usuario.` };
+    }
+    return {}; // «local» o «clean»: nada que decidir
+  }
+
+  let awaitingAiSince = 0; // desde cuándo se espera respuesta de la IA tras entregarle algo
+  const AI_WAIT_STEPS_MS = [45_000, 120_000];
+
+  /** Vigila que la IA conteste después de recibir un resultado; si no lo hace, queda en el registro y en el panel. */
+  async function watchAi() {
+    const started = Date.now();
+    awaitingAiSince = started;
+    for (const limit of AI_WAIT_STEPS_MS) {
+      await WMB.sleep(Math.max(0, limit - (Date.now() - started)));
+      if (awaitingAiSince !== started || adapter.lastActivity > started) return; // la IA ya contestó (o llegó otra llamada)
+      const waitedS = Math.round((Date.now() - started) / 1000);
+      audit('warn', 'ai.no_response', { waitedS, streaming: adapter.isStreaming() });
+      widget.log('err', `La IA no responde desde hace ${waitedS} s tras recibir el resultado.`);
+    }
+  }
+
   let lastUnreadable = '';
+  let unreadableRetries = 0; // reintentos automáticos seguidos; se reinicia con una llamada válida
+  const RETRY_LIMITS = [3000, 1500, 800]; // caracteres máx. por trozo en cada reintento
 
   const UNREADABLE_SETTLE_MS = 8000;
 
@@ -290,20 +419,48 @@
     lastUnreadable = sig;
     widget.log('err', `La IA escribió una llamada que no se puede leer: ${problem}.`);
     audit('warn', 'call.unreadable', { problem, snippet });
+    unreadableRetries += 1;
+    if (unreadableRetries > RETRY_LIMITS.length) {
+      widget.log('err', `La IA no logra enviar el bloque tras ${RETRY_LIMITS.length} reintentos: se detiene el reintento automático. Pídele una versión más corta o continúa tú.`);
+      audit('warn', 'call.retry_stop', { problem });
+      return;
+    }
+    const chunk = RETRY_LIMITS[unreadableRetries - 1];
+    widget.log('err', `Reintento automático ${unreadableRetries}/${RETRY_LIMITS.length}: se pide a la IA trozos de ~${chunk} caracteres.`);
+    const size = text.length - Math.max(at, 0);
     const message = `[MCP_RESULT status="error"]\nNo se pudo leer tu bloque mcp_call: ${problem}. No se ejecutó nada. `
-      + 'Repite la llamada con JSON válido: un único bloque ```json con {"mcp_call":{"server":"…","name":"…","arguments":{…}}}; '
-      + 'dentro de los textos escapa las comillas como \\" y usa / en las rutas.\n[/MCP_RESULT]';
+      + `Tu bloque medía unos ${size} caracteres${size > 3500 ? ': es demasiado largo y el mensaje se corta' : ''}. `
+      + `No lo repitas igual (reintento ${unreadableRetries}/${RETRY_LIMITS.length}): divídelo en trozos de máx. ~${chunk} caracteres, UNA llamada por mensaje: write_file con el primer trozo y append_file con los siguientes (si no existe append_file: edit_file cambiando el marcador /*PARTE2*/ por el trozo siguiente + marcador nuevo). `
+      + 'El contenido de archivos va en crudo entre @@@ y @@@ (sin escapar comillas ni saltos de línea). Formato: un único bloque ```json con {"mcp_call":{"server":"…","name":"…","arguments":{…}}}; usa / en las rutas.\n[/MCP_RESULT]';
     const sent = await adapter.sendToolResult(message, { autoSend: state.settings.autoSend });
     if (!sent.ok) widget.log('err', sent.error);
+    else watchAi();
   }
 
   /** Nunca deja que un fallo o una llamada atascada bloquee las siguientes. */
   async function processCall(detected) {
+    currentId = detected.id;
+    { const t = tracked.get(detected.id); if (t) t.state = 'running'; }
+    currentCid = Math.random().toString(36).slice(2, 7);
+    awaitingAiSince = 0;
+    const startedAt = Date.now();
+    unreadableRetries = 0; // llegó una llamada legible: se reinicia el reintento automático
     try {
       await handleCall(detected);
     } catch (err) {
       widget.log('err', `Error: ${err.message}`);
       audit('error', 'call.failed', { tool: detected?.call?.name, error: err.message, stack: String(err.stack ?? '').split('\n').slice(0, 3).join(' | ') });
+    } finally {
+      const t = tracked.get(detected.id);
+      if (t && t.state !== 'delivered') {
+        t.state = 'failed';
+        audit('warn', 'call.not_executed', { tool: detected?.call?.name, ms: Date.now() - startedAt });
+        widget.log('err', `La llamada ${detected?.call?.name ?? ''} no llegó a ejecutarse. Reintentando…`);
+        setTimeout(() => adapter.rescan?.(), 1500); // la reintenta el escáner si el mensaje sigue ahí
+      }
+      currentId = '';
+      audit('info', 'call.done', { ms: Date.now() - startedAt });
+      currentCid = '';
     }
   }
 
@@ -388,14 +545,26 @@
     }
   })();
 
+  // La página pregunta si una llamada ya fue entregada o sigue en curso (para no ejecutarla dos veces ni darla por hecha sin estarlo).
+  adapter.callStatus = (id) => tracked.get(id)?.state ?? null;
   refresh().then(() => {
     adapter.observeResponses(
       (detected) => {
         // Se procesan en serie para no mezclar resultados.
+        tracked.set(detected.id, { state: 'queued', at: Date.now() });
+        if (tracked.size > 200) tracked.delete(tracked.keys().next().value);
+        // Si otra llamada anterior bloquea la cola, que se note en vez de quedar en silencio.
+        setTimeout(() => {
+          if (tracked.get(detected.id)?.state === 'queued') {
+            audit('warn', 'call.queue_blocked', { tool: detected.call?.name, waitedMs: Date.now() - tracked.get(detected.id).at });
+            widget.log('err', `La llamada ${detected.call?.name ?? ''} espera a otra anterior que no termina.`);
+          }
+        }, QUEUE_WARN_MS);
         queue = queue.then(() => processCall(detected));
       },
       {
         onDone: ({ text, element }) => {
+          awaitingAiSince = 0; // la IA terminó de responder
           // La IA intentó llamar a una herramienta pero el bloque no se puede leer: antes se ignoraba en silencio.
           if (!platformOn()) return;
           const problem = state.settings.bridgeEnabled && state.tools.length ? WMB.diagnoseMcpCall(text) : null;

@@ -122,3 +122,11 @@ Unregister-ScheduledTask -TaskName WebMCPBridge-Update -Confirm:$false
 ```
 
 Después quita la extensión en `chrome://extensions`.
+
+## Repos de GitHub (repo-github)
+
+El MCP `repo-github` (archivos, git y API de GitHub para varios repos) vive ahora en un repositorio aparte, junto con los demás MCP propios. El puente lo lanza como cualquier otro MCP desde `server\servers.json`, por ejemplo: `{"repo-github": {"command": "py", "args": ["C:/ruta/repo-github/repo_mcp.py"], "port": 8793}}`.
+
+La extensión trata de forma especial a cualquier MCP que ofrezca la herramienta `sync_check` (y `sync_apply`):
+
+**Sincronización:** antes de trabajar con un repo, la extensión consulta GitHub. Si solo cambió GitHub, actualiza la copia local y se lo cuenta a la IA. Si cambiaron GitHub y lo local, te pregunta qué conservar (*Usar GitHub* guarda un respaldo de lo local; *Mantener lo local* mezcla lo nuevo). Se repite cada 10 minutos y siempre antes de `git_commit` y `git_push`.

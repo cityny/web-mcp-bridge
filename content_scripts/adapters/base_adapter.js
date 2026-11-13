@@ -35,6 +35,14 @@
       this.selectors = selectors;
       this.executed = this.#loadExecuted();
       this.baselineUntil = 0;
+      this.rememberedInfo = new Map(); // id → { count, text }: dónde estaba la conversación cuando se lanzó cada llamada
+      this.elementIds = new WeakMap(); this.elementSeq = 0;
+      this.lastSendAt = 0;             // último envío al chat (usuario o resultado de herramienta)
+      this.firstSeen = new WeakMap();  // elemento → cuándo lo vimos por primera vez
+      this.retries = new Map();        // id → reintentos de una llamada que no llegó a ejecutarse
+      this.liveEls = new WeakSet();    // respuestas que vimos generarse en vivo en esta pestaña (no son un repintado)
+      this.seenOn = new WeakMap();     // mensaje (elemento) → ids que ya lanzó
+      this.trace = () => {}; // core_bridge lo conecta al registro de auditoría: trace(evento, detalles, nivel)
       this.lastActivity = 0;
       this.freshChat = false;
       this.awaitingSince = 0;   // momento en que se envió algo y se espera una respuesta nueva
@@ -64,6 +72,7 @@
     /** El usuario acaba de enviar un mensaje (lo llama core_bridge con eventos reales). */
     markActivity() {
       this.lastActivity = Date.now();
+      this.lastSendAt = this.lastActivity;
       this.awaitingSince = this.lastActivity;
       this.freshChat = this.getAssistantMessages().length === 0; // primer mensaje de un chat nuevo
     }
@@ -96,6 +105,8 @@
       let lastSig = '';
       let lastText = '';
       let lastDone = '';
+      let wasStreaming = false;
+      const traced = new Set(); // eventos ya registrados (evita repetir el mismo aviso en cada análisis)
       let stableSince = Date.now();
       this.baselineUntil = Date.now() + BASELINE_MS;
 
@@ -110,7 +121,12 @@
         const now = Date.now();
         const streaming = this.isStreaming();
         const messages = this.getAssistantMessages();
+        if (streaming !== wasStreaming) {
+          wasStreaming = streaming;
+          if (streaming) this.trace('ai.streaming', { messages: messages.length });
+        }
         if (streaming) {
+          lastSig = '';                                        // al terminar de generar, volver a analizar aunque el texto mida igual
           this.lastActivity = now;
           this.baselineUntil = 0;                              // hay generación en vivo: la conversación no es «antigua»
           if (messages.length <= 1) this.freshChat = true;     // primera respuesta de un chat nuevo
@@ -120,13 +136,20 @@
         let last = -1;
         for (let i = messages.length - 1; i >= 0 && last < 0; i -= 1) if ((messages[i].textContent || '').trim()) last = i;
         const text = last >= 0 ? messages[last].textContent : '';
+        if (last >= 0 && !this.firstSeen.has(messages[last])) this.firstSeen.set(messages[last], now);
+        if (streaming && last >= 0) this.liveEls.add(messages[last]);
         if (text !== lastText) { lastText = text; stableSince = now; this.awaitingSince = 0; } // llegó contenido nuevo
 
         // Con «generando» activo se espera, salvo que el texto lleve un rato estable (indicador pegado).
         if (streaming && now - stableSince < STUCK_MS) { schedule(1000); return; }
+        if (streaming && !traced.has(`stuck${text.length}`)) {
+          traced.add(`stuck${text.length}`);
+          this.trace('ai.stuck_indicator', { stableS: Math.round((now - stableSince) / 1000) }); // la IA «pensando» también lo provoca
+        }
 
         const baseline = now < this.baselineUntil;
-        const sig = `${location.pathname}|${messages.length}|${last}|${text.length}`;
+        if (last >= 0 && !this.elementIds.has(messages[last])) this.elementIds.set(messages[last], ++this.elementSeq);
+        const sig = `${location.pathname}|${messages.length}|${last}|${text.length}|${last >= 0 ? this.elementIds.get(messages[last]) : 0}`; // incluye el elemento: un mensaje nuevo con el mismo texto también se analiza
         if (!baseline && sig === lastSig) return;
         lastSig = sig;
 
@@ -137,14 +160,53 @@
           const calls = WMB.extractMcpCalls(i === last ? text : element.textContent || '');
           calls.forEach((call, n) => {
             const id = `${this.getMessageKey(element, i)}#${n}:${WMB.hash(JSON.stringify(call))}`;
-            if (this.executed.has(id)) return;
+            let known = this.executed.has(id);
+            if (known && !baseline && i === last && n === 0) {
+              // La clave depende del contenido: un git_push idéntico a uno anterior choca con él. Si es OTRA respuesta de la IA
+              // (otro elemento y más mensajes o texto distinto) es una llamada nueva y legítima; un repintado del mismo mensaje no.
+              const info = this.rememberedInfo.get(id);
+              const fresh = info ? (messages.length > info.count || text !== info.text) : false;
+              // Sin memoria previa (p. ej. tras recargar) o misma posición («regenerar»): si la vimos generarse en vivo, es una respuesta nueva.
+              const status = this.callStatus ? this.callStatus(id) : null;
+              const lost = status === 'failed' && (this.retries.get(id) ?? 0) < 2; // la lanzó pero nunca se ejecutó
+              if (lost) {
+                this.retries.set(id, (this.retries.get(id) ?? 0) + 1);
+                known = false;
+                this.trace('call.retry_unexecuted', { server: call.server, tool: call.name, attempt: this.retries.get(id) }, 'warn');
+              }
+              // Una llamada idéntica en una respuesta NUEVA siempre se ejecuta (git push las veces que haga falta). Señales de «respuesta nueva»:
+              const born = this.firstSeen.get(element) ?? 0;
+              const afterSend = this.lastSendAt > 0 && born >= this.lastSendAt - 500;                 // el elemento apareció tras un envío
+              const otherAlive = Boolean(info?.el && info.el !== element && info.el.isConnected);     // la anterior sigue en pantalla: es otro mensaje
+              const turn = info ? (info.el !== element && this.lastSendAt > info.at && afterSend && Date.now() - info.at > 6000) : afterSend;
+              if (!lost && !this.seenOn.get(element)?.has(id) && (fresh || this.liveEls.has(element) || otherAlive || turn)) {
+                known = false;
+                this.trace('call.repeated', { server: call.server, tool: call.name, reason: 'llamada idéntica a una anterior, en una respuesta nueva' });
+              }
+            }
+            if (known) {
+              if (!baseline && !traced.has(id)) {
+                traced.add(id);
+                this.trace('call.skipped', {
+                  reason: 'duplicate', server: call.server, tool: call.name, lastMessage: i === last,
+                  seenHere: Boolean(this.seenOn.get(element)?.has(id)), knownBefore: this.rememberedInfo.has(id),
+                });
+              }
+              return;
+            }
             this.#remember(id);
+            this.rememberedInfo.set(id, { count: messages.length, text, at: Date.now(), el: element });
+            if (this.rememberedInfo.size > 300) this.rememberedInfo.delete(this.rememberedInfo.keys().next().value);
+            const launched = this.seenOn.get(element) ?? new Set();
+            launched.add(id);
+            this.seenOn.set(element, launched);
             // Protocolo: una llamada por mensaje → solo se ejecuta la primera.
             if (!baseline && n === 0) callback({ id, call, element });
+            else this.trace('call.skipped', { reason: baseline ? 'baseline' : 'extra_in_message', server: call.server, tool: call.name, n }, baseline ? 'info' : 'warn'); // al recargar la pestaña es normal memorizar las llamadas viejas
           });
           if (!baseline && i === last && !calls.length && !streaming && onDone) {
             const doneKey = `${this.getMessageKey(element, i)}:${text.length}`;
-            if (doneKey !== lastDone) { lastDone = doneKey; onDone({ text, element }); }
+            if (doneKey !== lastDone) { lastDone = doneKey; this.trace('ai.done', { chars: text.length, calls: 0, mentionsCall: text.includes('mcp_call') }); onDone({ text, element }); }
           }
         }
       };
@@ -284,7 +346,7 @@
         sent = await attempt(4000);
         if (token?.prev) WMB.bg({ type: 'RESTORE_FOCUS', prev: token.prev });
       }
-      if (sent) this.awaitingSince = Date.now();
+      if (sent) { this.awaitingSince = Date.now(); this.lastSendAt = this.awaitingSince; }
       return sent ? { ok: true } : { ok: false, error: 'No se pudo confirmar el envío al chat. Pulsa Enter en el chat.' };
     }
 
