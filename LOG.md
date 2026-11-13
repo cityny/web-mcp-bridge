@@ -238,3 +238,10 @@
 - Antes de cada envío automático: pausa mínima desde el último (5 s + hasta un 50 % al azar) y tope de envíos por minuto (8). Ambos en el popup.
 - Después: si aparece un aviso NUEVO de «demasiados mensajes», se espera ~20/40/80 s (±30 %) y se reenvía; tras 3 intentos se avisa al usuario. Se cuentan los avisos (no se reconocen por elemento) porque DeepSeek repinta el chat; se ignoran textos largos y el propio resultado enviado (podría contener «inténtalo más tarde»).
 - Prueba nueva `tests/browser/test_ritmo.mjs` (Chromium + DeepSeek simulado): reenvío, pausa, falso positivo, repintado y aviso persistente.
+## 2026-11-14 — Claude (asistente de desarrollo) · Contexto por niveles (idea de Isabel)
+- Medido con las herramientas reales de AutoCAD: el prompt ocupaba 11.668 caracteres solo para ese MCP, se reenvía cada pocos mensajes, cortaba 9 descripciones a 400 caracteres y NO incluía las instrucciones del servidor (ahí está el flujo de trabajo).
+- Nivel 0 (siempre): catálogo con la firma compacta y la primera frase de cada herramienta, y la primera frase de la guía de cada servidor. AutoCAD: 6.999 caracteres (−40 %).
+- Nivel 1 (bajo demanda): herramienta virtual `wmb.ayuda(servidor, herramienta?)`, que responde la propia extensión: guía completa del servidor (sus `instructions`, que ahora se guardan del `initialize`) o ficha completa de una herramienta.
+- Si una llamada falla, el error va con la ficha de esa herramienta para que la IA se corrija sola.
+- `ayuda` se marca como entregada (si no, el vigilante de llamadas no ejecutadas la reintentaría).
+- `npm test` volvía a fallar por `tests/test_repo_mcp.py` (trasladado a mis-mcp en el PR #11): quitado del script.

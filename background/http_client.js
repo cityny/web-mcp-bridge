@@ -182,6 +182,7 @@ export class HttpMcpConnection {
       clientInfo: { name: 'web-mcp-bridge', version: chrome.runtime?.getManifest?.().version ?? '1' },
     });
     this.serverInfo = init?.serverInfo ?? { name: 'mcp' };
+    this.instructions = typeof init?.instructions === 'string' ? init.instructions : '';
     await this.notify('notifications/initialized');
     await this.refreshTools();
     if (this.#closedByUser) return;

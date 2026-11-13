@@ -204,6 +204,7 @@ async function getActiveTools() {
         name: t.name,
         description: t.description ?? '',
         inputSchema: t.inputSchema ?? { type: 'object', properties: {} },
+        serverInstructions: connections.get(s.id)?.instructions ?? '', // guía del servidor: la da `ayuda` bajo demanda
       });
     }
   }
