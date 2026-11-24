@@ -37,6 +37,12 @@ def test_formats(tmp: Path) -> None:
     write(cfg, {"mcpServers": {"a": {"command": "x"}, "b": {"command": "y", "port": 8800}}})
     a, b = load_config(cfg)
     assert (a.port, b.port) == (8801, 8800)
+    # Una clave `mcpServers` VACÍA junto a servidores sueltos no los esconde (rompía todo el puente)
+    write(cfg, {"autocad": {"url": "http://127.0.0.1:8765/mcp"}, "x": {"command": "x", "port": 8801}, "mcpServers": {}})
+    a, x = load_config(cfg)
+    assert (a.name, x.name) == ("autocad", "x")
+    write(cfg, {"x": {"command": "x", "port": 8801}, "mcpServers": {"y": {"command": "y", "port": 8802}}})
+    assert sorted(c.name for c in load_config(cfg)) == ["x", "y"]
     # MCP por HTTP: no lleva comando ni puerto (no se arranca), y no choca con los puertos automáticos
     write(cfg, {"autocad": {"url": "http://127.0.0.1:8765/mcp"}, "x": {"command": "x"}})
     a, x = load_config(cfg)

@@ -586,7 +586,10 @@ def _entries(data) -> list[dict]:
     """Normaliza los formatos admitidos a una lista de entradas con `name`."""
     if isinstance(data, dict) and isinstance(data.get("servers"), list):
         return [dict(e) for e in data["servers"]]
-    mapping = data.get("mcpServers", data) if isinstance(data, dict) else None
+    mapping = data if isinstance(data, dict) else None
+    if isinstance(data, dict) and isinstance(data.get("mcpServers"), dict):
+        # Una clave `mcpServers` (aunque esté vacía) puede convivir con servidores sueltos: se suman, no se esconden.
+        mapping = {**{k: v for k, v in data.items() if k != "mcpServers" and isinstance(v, dict)}, **data["mcpServers"]}
     if not isinstance(mapping, dict):
         raise ValueError("formato no reconocido: se esperaba {\"servers\": [...]}, {\"mcpServers\": {...}} o {nombre: {...}}")
     entries = []

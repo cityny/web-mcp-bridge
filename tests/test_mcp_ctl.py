@@ -61,5 +61,9 @@ with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
     assert ctl(cfg, "remove", "b")[0] == 0 and json.loads(cfg.read_text(encoding="utf-8"))["servers"][0]["name"] == "a"
     cfg.write_text(json.dumps({"mcpServers": {"c": {"command": "z", "port": 8103}}}), encoding="utf-8")
     assert ctl(cfg, "stop", "c")[0] == 0 and names() == []
+    # servidores sueltos + `mcpServers` vacío: se ven todos (antes decía «Disponibles: ninguno»)
+    cfg.write_text(json.dumps({"d": {"command": "z", "port": 8104}, "e": {"url": "http://127.0.0.1:1/mcp"}, "mcpServers": {}}), encoding="utf-8")
+    assert names() == ["d", "e"], names()
+    assert ctl(cfg, "stop", "d")[0] == 0
 
 print("test_mcp_ctl: todo correcto")
