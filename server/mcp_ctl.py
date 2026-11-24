@@ -28,7 +28,10 @@ def container(data):
     if isinstance(data, dict) and isinstance(data.get("servers"), list):
         return "list", data["servers"]
     if isinstance(data, dict) and isinstance(data.get("mcpServers"), dict):
-        return "map", data["mcpServers"]
+        otros = [k for k, v in data.items() if k != "mcpServers" and isinstance(v, dict)]
+        if not otros:
+            return "map", data["mcpServers"]
+        return "map", data          # servidores sueltos junto a un `mcpServers` (vacío o no): el archivo es el mapa
     if isinstance(data, dict):
         return "map", data
     raise ValueError("servers.json debe ser un objeto JSON")
@@ -38,7 +41,7 @@ def entries(data):
     kind, box = container(data)
     if kind == "list":
         return [(str(e.get("name", "")), e) for e in box if isinstance(e, dict)]
-    return [(k, v) for k, v in box.items() if isinstance(v, dict)]
+    return [(k, v) for k, v in box.items() if isinstance(v, dict) and k != "mcpServers"]
 
 
 def find(data, name: str):
