@@ -166,10 +166,66 @@
     return out;
   }
 
-  /** JSON.parse tolerante: si falla, reintenta con las barras invertidas reparadas. */
+  /**
+   * Repara los descuidos de estructura más comunes de un modelo, sin inventar nada que falte (un bloque CORTADO sigue siendo ilegible y
+   * nunca se ejecuta a medias): coma final antes de } o ], `True/False/None` de Python, cadenas con comillas simples y claves sin comillas.
+   * Respeta el contenido de las cadenas con comillas dobles.
+   */
+  function repairStructure(text) {
+    let out = '';
+    let i = 0;
+    let last = ''; // último carácter significativo ya emitido (fuera de cadenas)
+    const n = text.length;
+    while (i < n) {
+      const ch = text[i];
+      if (ch === '"') {
+        let j = i + 1;
+        while (j < n && text[j] !== '"') j += text[j] === '\\' ? 2 : 1;
+        out += text.slice(i, j + 1);
+        i = j + 1;
+        last = '"';
+      } else if (ch === "'") {
+        let j = i + 1;
+        let body = '';
+        while (j < n && text[j] !== "'") {
+          if (text[j] === '\\' && j + 1 < n) { body += text[j + 1] === "'" ? "'" : text[j] + text[j + 1]; j += 2; }
+          else { body += text[j] === '"' ? '\\"' : text[j]; j += 1; }
+        }
+        out += `"${body}"`;
+        i = j + 1;
+        last = '"';
+      } else if (ch === ',') {
+        let j = i + 1;
+        while (j < n && /\s/.test(text[j])) j += 1;
+        if (text[j] === '}' || text[j] === ']') { i += 1; continue; } // coma final
+        out += ch; i += 1; last = ',';
+      } else if (/[A-Za-z_]/.test(ch)) {
+        let j = i;
+        while (j < n && /[A-Za-z0-9_]/.test(text[j])) j += 1;
+        const word = text.slice(i, j);
+        let k = j;
+        while (k < n && /\s/.test(text[k])) k += 1;
+        if (word === 'True') out += 'true';
+        else if (word === 'False') out += 'false';
+        else if (word === 'None') out += 'null';
+        else if (text[k] === ':' && (last === '{' || last === ',')) out += `"${word}"`; // clave sin comillas
+        else out += word;
+        i = j; last = 'w';
+      } else {
+        out += ch; i += 1;
+        if (!/\s/.test(ch)) last = ch;
+      }
+    }
+    return out;
+  }
+
+  /** JSON.parse tolerante: si falla, reintenta con la estructura y las barras invertidas reparadas. */
   function parseLenient(json) {
     try { return JSON.parse(json); } catch { /* se intenta reparar */ }
-    return JSON.parse(repairBackslashes(json));
+    try { return JSON.parse(repairBackslashes(json)); } catch { /* sigue */ }
+    const structured = repairStructure(json);
+    try { return JSON.parse(structured); } catch { /* sigue */ }
+    return JSON.parse(repairBackslashes(structured));
   }
 
   /**
@@ -183,12 +239,14 @@
 
   function scanCalls(text) {
     const calls = [];
-    const marker = '"mcp_call"';
+    const marker = /["']?mcp_call["']?\s*:/g; // «mcp_call» con comillas dobles, simples o sin comillas
     let from = 0;
     for (;;) {
-      const at = text.indexOf(marker, from);
-      if (at === -1) break;
-      from = at + marker.length;
+      marker.lastIndex = from;
+      const found = marker.exec(text);
+      if (!found) break;
+      const at = found.index;
+      from = at + found[0].length;
       const start = text.lastIndexOf('{', at);
       if (start === -1) continue;
       const end = findBalancedEnd(text, start);
@@ -197,6 +255,10 @@
         const call = parseLenient(text.slice(start, end + 1))?.mcp_call;
         if (call && typeof call.name === 'string' && call.name) {
           let args = call.arguments;
+          if (args === undefined) { // sin «arguments»: los demás campos del objeto son los argumentos (el modelo olvidó el nivel)
+            const rest = Object.fromEntries(Object.entries(call).filter(([k]) => !['server', 'name', 'arguments'].includes(k)));
+            if (Object.keys(rest).length) args = rest;
+          }
           if (typeof args === 'string') { try { args = JSON.parse(args); } catch { args = {}; } } // algunos modelos serializan los argumentos
           calls.push({
             server: typeof call.server === 'string' ? call.server : null,
@@ -226,6 +288,7 @@
 
   /** Expuesto para tests y adaptadores. */
   WMB.repairJsonBackslashes = repairBackslashes;
+  WMB.repairJsonStructure = repairStructure;
 
   /** Tamaño de los textos de una llamada: caracteres totales y líneas del texto más largo. */
   WMB.sizeOfArguments = (args) => {
@@ -240,7 +303,7 @@
   };
 
   /** ¿El texto CONTIENE un intento de bloque {"mcp_call": …}? (no basta con mencionar la palabra) */
-  const CALL_ATTEMPT = /\{\s*["“”]mcp_call["“”]\s*:/;
+  const CALL_ATTEMPT = /\{\s*["“”']?mcp_call["“”']?\s*:/;
 
   /**
    * Si la IA escribió un bloque mcp_call que no se puede leer, explica por qué (para avisar al usuario y a la IA).

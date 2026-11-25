@@ -148,3 +148,34 @@ assert.equal(WMB.planResult({ content: [{ type: 'text', text: 'corto' }] }, { se
   assert.match(arroba, /append_file/, 'con @@@ sin cerrar se trocea aunque sea corto');
 }
 console.log('✔ test_utils: todo correcto');
+
+// 9) Descuidos de estructura habituales: se leen (coma final, True/False/None, comillas simples, claves sin comillas)
+calls = WMB.extractMcpCalls('{"mcp_call":{"server":"autocad","name":"buscar","arguments":{"capa":"MUROS","listar":True,"limite":20,}}}');
+assert.equal(calls.length, 1, 'coma final y True');
+assert.deepEqual({ ...calls[0].arguments }, { capa: 'MUROS', listar: true, limite: 20 });
+calls = WMB.extractMcpCalls("{'mcp_call': {'server': 'autocad', 'name': 'panorama', 'arguments': {'espacio': 'activo', 'zona': None}}}");
+assert.equal(calls.length, 1, 'comillas simples y None');
+assert.deepEqual({ ...calls[0].arguments }, { espacio: 'activo', zona: null });
+calls = WMB.extractMcpCalls('{mcp_call:{server:"autocad",name:"estado",arguments:{}}}');
+assert.equal(calls.length, 1, 'claves sin comillas');
+assert.equal(calls[0].name, 'estado');
+// la estructura reparada no toca el contenido de las cadenas
+calls = WMB.extractMcpCalls('{"mcp_call":{"name":"t","arguments":{"txt":"a, } True \'x\' k:1",}}}');
+assert.equal(calls.length, 1);
+assert.equal(calls[0].arguments.txt, "a, } True 'x' k:1");
+// con comillas simples que contienen comillas dobles
+calls = WMB.extractMcpCalls("{\"mcp_call\":{\"name\":\"t\",\"arguments\":{\"expresion\":'(command \"_.ZOOM\" \"_E\")'}}}");
+assert.equal(calls.length, 1);
+assert.equal(calls[0].arguments.expresion, '(command "_.ZOOM" "_E")');
+
+// 10) Sin «arguments»: los demás campos son los argumentos
+calls = WMB.extractMcpCalls('{"mcp_call":{"server":"autocad","name":"buscar","capa":"MUROS","listar":true}}');
+assert.equal(calls.length, 1);
+assert.deepEqual({ ...calls[0].arguments }, { capa: 'MUROS', listar: true });
+calls = WMB.extractMcpCalls('{"mcp_call":{"server":"autocad","name":"estado"}}');
+assert.deepEqual({ ...calls[0].arguments }, {});
+
+// 11) Un bloque CORTADO nunca se completa ni se ejecuta (podría perder argumentos): sigue siendo ilegible y se explica
+assert.equal(WMB.extractMcpCalls('{"mcp_call":{"server":"autocad","name":"operar_seleccion","arguments":{"accion":"borrar","handles":["1A","2B"').length, 0);
+assert.match(WMB.diagnoseMcpCall('{"mcp_call":{"server":"autocad","name":"operar_seleccion","arguments":{"accion":"borrar","handles":["1A","2B"'), /no está cerrado/);
+console.log('✔ parser tolerante: estructura, comillas simples, sin arguments y bloque cortado');
