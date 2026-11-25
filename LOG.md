@@ -1,5 +1,10 @@
 # LOG
 
+## 2026-11-25 — Claude · Parser más tolerante con los descuidos de estructura de DeepSeek
+- `extractMcpCalls` ya leía barras sueltas, comillas tipográficas y `@@@`. Ahora también: coma final antes de `}`/`]`, `True/False/None` de Python, cadenas con comillas simples, claves sin comillas (`{mcp_call:{name:…}}`) y `mcp_call` con comillas simples. Si falta `"arguments"`, los demás campos del objeto son los argumentos (el modelo olvidó el nivel). Las cadenas con comillas dobles no se tocan.
+- **Regla que no cambia**: un bloque CORTADO (llaves o `@@@` sin cerrar) NO se completa ni se ejecuta: podría perder argumentos (p. ej. una lista de handles a borrar). Sigue explicándose con `diagnoseMcpCall` y se le pide a la IA reenviarlo.
+- Pruebas: `tests/test_utils.mjs` casos 9–11.
+
 ## 2026-11-24 — Claude · Una clave `mcpServers` vacía escondía todos los MCP
 - Síntoma: `mcp_ctl.py start autocad-mcp` decía «No existe… Disponibles: ninguno». Causa: al añadir Browser MCP desde la extensión quedó en `servers.json` una clave `"mcpServers": {}` junto a los servidores sueltos; el puente y `mcp_ctl` la tomaban como la lista completa (vacía).
 - Arreglo: `servers.json` con servidores sueltos + `mcpServers` los suma (puente) o trata el archivo entero como el mapa (`mcp_ctl`, ignorando esa clave). Pruebas en `test_bridge_config.py` y `test_mcp_ctl.py`.
