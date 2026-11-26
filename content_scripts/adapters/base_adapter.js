@@ -47,7 +47,7 @@
       this.lastActivity = 0;
       this.freshChat = false;
       this.awaitingSince = 0;   // momento en que se envió algo y se espera una respuesta nueva
-      this.options = { focusFallback: true, sendPauseMinSec: 2, sendPauseMaxSec: 5, maxSendsPerMinute: 8, maxCallsPerMessage: 1 };
+      this.options = { focusFallback: true, sendPauseMinSec: 4, sendPauseMaxSec: 12, readPause: true, maxSendsPerMinute: 5, maxCallsPerMessage: 1 };
       this.sendTimes = [];              // envíos automáticos recientes (ritmo de envío)
       this.rescan = () => {};
     }
@@ -358,6 +358,7 @@
         this.debug?.('ok', `Esperando ${Math.ceil(wait / 1000)} s antes de enviar (para no mandar mensajes demasiado seguidos).`);
         await WMB.sleep(wait);
       }
+      if (autoSend && this.options.readPause) await WMB.sleep(WMB.readPause(text.length)); // pausa de «lectura»: el resultado no aparece al instante
       // En DeepSeek el aviso queda en el chat, debajo de nuestro mensaje, y la página se repinta a menudo: se cuenta
       // CUÁNTOS avisos hay (un repintado no cambia la cantidad; un aviso nuevo, sí).
       let avisos = this.rateLimitNotices(text).length;

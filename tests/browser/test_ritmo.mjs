@@ -43,7 +43,7 @@ try {
   for (const code of scripts) await page.addScriptTag({ content: code });
   await page.evaluate(() => {
     window.a = WMB.findAdapter('chat.deepseek.com');
-    window.a.configure({ sendPauseMinSec: 1, sendPauseMaxSec: 1, maxSendsPerMinute: 0 });
+    window.a.configure({ sendPauseMinSec: 1, sendPauseMaxSec: 1, maxSendsPerMinute: 0, readPause: false });
     window.registro = []; window.a.debug = (k, m) => window.registro.push(m);
     WMB.backoffMs = () => 400; // en la prueba no se esperan 20 s
   });

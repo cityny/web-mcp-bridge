@@ -45,12 +45,16 @@ export const DEFAULT_SETTINGS = {
   /** Recargar la extensión sola cuando la tarea de actualización baja una versión nueva (update-stamp.json). */
   autoUpdate: true,
   /** Pausa entre dos envíos automáticos al chat: al azar entre estos segundos (evita «Messages too frequent»). */
-  sendPauseMinSec: 2,
-  sendPauseMaxSec: 5,
+  sendPauseMinSec: 4,
+  sendPauseMaxSec: 12,
+  /** Pausa extra de «lectura» (1–3 s + según el tamaño) antes de pegar cada resultado: menos aspecto de robot. */
+  readPause: true,
+  /** Si la IA niega tener las herramientas (sin hacer ninguna llamada), se le envía sola una corrección (máx. 2 por mensaje del usuario). */
+  autoCorrect: true,
   /** Llamadas que la IA puede escribir en UN mensaje (1 = una, como siempre; máx. 3): se ejecutan en orden y vuelven juntas. */
   maxCallsPerMessage: 1,
   /** Máximo de envíos automáticos por minuto (0 = sin límite). */
-  maxSendsPerMinute: 8,
+  maxSendsPerMinute: 5,
   /** Tiempo máximo (segundos) que se espera a una herramienta. Operaciones grandes de AutoCAD pueden tardar minutos. */
   toolTimeoutSec: 300,
   /** Plataformas donde actúa la extensión. Las desactivadas se ignoran por completo (no inyecta ni ejecuta nada). */

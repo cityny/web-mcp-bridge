@@ -367,7 +367,7 @@ function renderSettings(settings) {
   $('#master').checked = settings.bridgeEnabled;
   $('#master-label').textContent = settings.bridgeEnabled ? 'Bridge activado' : 'Bridge desactivado: no se conecta ni se inyecta nada';
   $('#main').classList.toggle('off', !settings.bridgeEnabled);
-  for (const key of ['autoInject', 'autoSend', 'reminder', 'focusFallback', 'preferSidePanel']) $(`#set-${key}`).checked = Boolean(settings[key]);
+  for (const key of ['autoInject', 'autoSend', 'reminder', 'focusFallback', 'preferSidePanel', 'readPause', 'autoCorrect']) $(`#set-${key}`).checked = Boolean(settings[key]);
   $('#set-autoUpdate').checked = settings.autoUpdate !== false;
   for (const [id] of Object.entries(PLATFORM_LABELS)) {
     const box = $(`#plat-${id}`);
@@ -379,10 +379,10 @@ function renderSettings(settings) {
   if (document.activeElement?.id !== 'set-maxResultChars') $('#set-maxResultChars').value = settings.maxResultChars;
   if (document.activeElement?.id !== 'set-reinjectEvery') $('#set-reinjectEvery').value = settings.reinjectEvery;
   if (document.activeElement?.id !== 'set-toolTimeoutSec') $('#set-toolTimeoutSec').value = settings.toolTimeoutSec ?? 300;
-  if (document.activeElement?.id !== 'set-sendPauseMinSec') $('#set-sendPauseMinSec').value = settings.sendPauseMinSec ?? 2;
-  if (document.activeElement?.id !== 'set-sendPauseMaxSec') $('#set-sendPauseMaxSec').value = settings.sendPauseMaxSec ?? 5;
+  if (document.activeElement?.id !== 'set-sendPauseMinSec') $('#set-sendPauseMinSec').value = settings.sendPauseMinSec ?? 4;
+  if (document.activeElement?.id !== 'set-sendPauseMaxSec') $('#set-sendPauseMaxSec').value = settings.sendPauseMaxSec ?? 12;
   if (document.activeElement?.id !== 'set-maxCallsPerMessage') $('#set-maxCallsPerMessage').value = settings.maxCallsPerMessage ?? 1;
-  if (document.activeElement?.id !== 'set-maxSendsPerMinute') $('#set-maxSendsPerMinute').value = settings.maxSendsPerMinute ?? 8;
+  if (document.activeElement?.id !== 'set-maxSendsPerMinute') $('#set-maxSendsPerMinute').value = settings.maxSendsPerMinute ?? 5;
 }
 
 function renderVersion(update) {
@@ -479,7 +479,7 @@ $('#add-form').addEventListener('submit', async (event) => {
 });
 $('#perm-all').addEventListener('change', guard((e) => api('SET_ALL_PERMISSIONS', { permission: e.target.value })));
 $('#master').addEventListener('change', guard((e) => api('UPDATE_SETTINGS', { settings: { bridgeEnabled: e.target.checked } })));
-for (const key of ['autoInject', 'autoSend', 'reminder', 'focusFallback', 'preferSidePanel', 'autoUpdate']) {
+for (const key of ['autoInject', 'autoSend', 'reminder', 'focusFallback', 'preferSidePanel', 'autoUpdate', 'readPause', 'autoCorrect']) {
   $(`#set-${key}`).addEventListener('change', guard((e) => api('UPDATE_SETTINGS', { settings: { [key]: e.target.checked } })));
 }
 $('#set-reinjectEvery').addEventListener('change', guard((e) => {

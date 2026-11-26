@@ -40,6 +40,34 @@
     return Math.max(0, Math.round(wait));
   };
 
+  /**
+   * Pausa de «lectura» antes de pegar un resultado: 1–3 s al azar + algo más si el mensaje es largo (hasta 4 s).
+   * Evita que el resultado aparezca en el chat al instante de terminar la IA.
+   */
+  WMB.readPause = (length, rand = Math.random) => Math.round(1000 + 2000 * rand() + Math.min(4000, Math.max(0, Number(length) || 0) * 0.4));
+
+  /**
+   * ¿La IA dice que no tiene acceso a las herramientas? Se mira el INICIO de la respuesta (donde suele negarlo) y,
+   * en respuestas largas, cualquier frase que niegue «MCP/terminal/herramientas» (p. ej. «terminal-mcp no está disponible»).
+   * No actúa si la respuesta ya trae una llamada `mcp_call`.
+   */
+  const DENIAL_HEAD = /no tengo (habilitad[ao]s?|acceso|(la )?capacidad|herramientas|permiso)|no (puedo|logro) (acceder|ejecutar|controlar|usar|invocar|llamar|ver tu|abrir)|no dispongo de|sin acceso (a|al) (equipo|terminal|herramientas)|i (don'?t|do not) have (access|tools|the ability)|i (can'?t|cannot|am unable to|'m unable to) (access|control|run|execute|use|call|see your)|(tools?|mcp)[^.\n]{0,60}(not available|unavailable|not enabled)/i;
+  const DENIAL_ANYWHERE = /(terminal|mcp|herramientas?)[^.\n]{0,60}no (est[áa]n?|esta) (disponibles?|habilitad[ao]s?)|no tengo habilitada la ejecuci[óo]n|mcp[^.\n]{0,40}not available/i;
+  WMB.isDenial = (text) => {
+    const t = String(text ?? '');
+    if (/\{\s*["“”']?mcp_call/.test(t)) return false;
+    return DENIAL_HEAD.test(t.slice(0, 700)) || DENIAL_ANYWHERE.test(t);
+  };
+
+  /** Mensaje automático cuando la IA niega tener herramientas: lo desmiente con datos y le pide llamar al MCP. */
+  WMB.denialMessage = (tools, attempt = 1) => {
+    const servers = [...new Set((tools ?? []).map((t) => t.server))].join(', ') || 'ninguno';
+    return `[WMB] Corrección automática (${attempt}): SÍ tienes herramientas MCP locales y están activas (${servers}; ${(tools ?? []).length}). `
+      + 'La extensión ejecuta tus llamadas. No digas que no están disponibles ni describas pasos manuales: si necesitas datos del equipo, '
+      + 'responde SOLO con el bloque {"mcp_call":{"server":"…","name":"…","arguments":{…}}} dentro de un bloque ```json y espera el MCP_RESULT. '
+      + 'No afirmes nada del equipo sin un resultado real.';
+  };
+
   /** Espera tras un aviso de «demasiados mensajes»: ~20 s, 40 s, 80 s… con un 30 % de azar. */
   WMB.backoffMs = (attempt, rand = Math.random) => Math.round(20_000 * 2 ** attempt * (1 + 0.3 * rand()));
 

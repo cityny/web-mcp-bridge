@@ -33,6 +33,9 @@ async function loadState() {
   const data = await chrome.storage.local.get([KEYS.servers, KEYS.settings]);
   const stored = data[KEYS.settings] ?? {};
   const settings = { ...DEFAULT_SETTINGS, ...stored, platforms: { ...DEFAULT_SETTINGS.platforms, ...(stored.platforms ?? {}) } };
+  // Ritmo humano (2026-11-26): quien conservaba los valores antiguos por defecto (2–5 s, 8/min) pasa a los nuevos; lo elegido a mano se respeta.
+  if (stored.sendPauseMinSec === 2 && stored.sendPauseMaxSec === 5) { settings.sendPauseMinSec = DEFAULT_SETTINGS.sendPauseMinSec; settings.sendPauseMaxSec = DEFAULT_SETTINGS.sendPauseMaxSec; }
+  if (stored.maxSendsPerMinute === 8) settings.maxSendsPerMinute = DEFAULT_SETTINGS.maxSendsPerMinute;
   // Migración desde 1.0: «ejecutar sin preguntar» (autoExecute) pasa a ser el permiso «allow».
   if (!PERMISSIONS.includes(stored.defaultPermission)) settings.defaultPermission = stored.autoExecute ? 'allow' : 'ask';
   const servers = (data[KEYS.servers] ?? []).filter((s) => s.url).map((s) => ({ // sin dirección = marcador de la 1.1: se descarta

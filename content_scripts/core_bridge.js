@@ -27,8 +27,9 @@
   const HEARTBEAT_MS = 10_000;
   const TOOL_TIMEOUT_MS = 150_000;
   const DELIVER_TIMEOUT_MS = 120_000;
-  // La IA dice que no tiene acceso a nada local: señal de que perdió el contexto de las instrucciones.
-  const DENIAL = /no tengo acceso|no puedo acceder|no tengo (la )?capacidad de (acceder|ejecutar|controlar)|no puedo (ejecutar|controlar|ver tu|abrir)|no dispongo de (acceso|herramientas)|no tengo herramientas|i (don'?t|do not) have (access|tools)|i (can'?t|cannot|am unable to) (access|control|run|execute|see your)/i;
+    // «La IA niega tener acceso» → WMB.isDenial (utils.js).
+  const DENIAL_RETRY_MAX = 2; // correcciones automáticas por mensaje del usuario
+  let denialRetries = 0;
 
   const slugKey = (value) => String(value ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
   const guarded = (promise, ms, message) => Promise.race([promise, WMB.sleep(ms).then(() => { throw new Error(message); })]);
@@ -141,9 +142,10 @@
     state.tools = active.tools;
     adapter.configure({
       focusFallback: state.settings.focusFallback !== false,
-      sendPauseMinSec: Number(state.settings.sendPauseMinSec ?? 2),
-      sendPauseMaxSec: Math.max(Number(state.settings.sendPauseMinSec ?? 2), Number(state.settings.sendPauseMaxSec ?? 5)),
-      maxSendsPerMinute: Number(state.settings.maxSendsPerMinute ?? 8),
+      sendPauseMinSec: Number(state.settings.sendPauseMinSec ?? 4),
+      sendPauseMaxSec: Math.max(Number(state.settings.sendPauseMinSec ?? 4), Number(state.settings.sendPauseMaxSec ?? 12)),
+      readPause: state.settings.readPause !== false,
+      maxSendsPerMinute: Number(state.settings.maxSendsPerMinute ?? 5),
       maxCallsPerMessage: maxCalls(),
     });
     const host = document.getElementById('wmb-host');
@@ -550,6 +552,17 @@
     else watchAi();
   }
 
+  /** La IA negó tener herramientas sin llamar a ninguna: se lo desmiente con un mensaje automático (respeta el ritmo de envío). */
+  async function correctDenial(attempt) {
+    await WMB.sleep(2000);
+    if (adapter.isStreaming()) return; // sigue escribiendo: el observador volverá a evaluar al terminar
+    widget.log('err', `La IA dice que no tiene acceso a las herramientas: le envío una corrección automática (${attempt}/${DENIAL_RETRY_MAX}).`);
+    const sent = await adapter.sendToolResult(WMB.denialMessage(state.tools, attempt), { autoSend: state.settings.autoSend });
+    audit(sent.ok ? 'info' : 'warn', 'ai.denial_corrected', { attempt, ok: sent.ok, error: sent.error });
+    if (!sent.ok) widget.log('err', sent.error);
+    else watchAi();
+  }
+
   /** Nunca deja que un fallo o una llamada atascada bloquee las siguientes. */
   async function processCall(detected) {
     currentId = detected.id;
@@ -557,6 +570,7 @@
     currentCid = Math.random().toString(36).slice(2, 7);
     awaitingAiSince = 0;
     const startedAt = Date.now();
+    denialRetries = 0;
     unreadableRetries = 0; // llegó una llamada legible: se reinicia el reintento automático
     try {
       await (detected.extra?.length && maxCalls() > 1 ? handleBatch(detected) : handleCall(detected));
@@ -592,6 +606,7 @@
    */
   function interceptSend(event) {
     if (!event.isTrusted || injecting || !platformOn()) return;
+    denialRetries = 0; // mensaje nuevo del usuario: se reinicia el tope de correcciones
     adapter.markActivity(); // el usuario envía algo: la respuesta que llegue es NUEVA (no historial)
     const { bridgeEnabled, autoInject, reminder, reinjectEvery } = state.settings;
     if (!bridgeEnabled || !state.tools.length) return;
@@ -685,9 +700,15 @@
             queue = queue.then(() => reportUnreadableCall(text, element));
             return;
           }
-          if (state.settings.bridgeEnabled && state.tools.length && text.length < 1500 && DENIAL.test(text)) {
+          if (state.settings.bridgeEnabled && state.tools.length && WMB.isDenial(text)) {
             state.forceFull = true;
-            widget.log('err', 'La IA dice que no tiene acceso: renovaré las instrucciones en tu próximo mensaje.');
+            audit('warn', 'ai.denial_detected', { chars: text.length, head: text.slice(0, 160) });
+            if (state.settings.autoCorrect !== false && denialRetries < DENIAL_RETRY_MAX) {
+              denialRetries += 1;
+              queue = queue.then(() => correctDenial(denialRetries));
+            } else {
+              widget.log('err', 'La IA dice que no tiene acceso: renovaré las instrucciones en tu próximo mensaje.');
+            }
           }
         },
       },

@@ -1,5 +1,12 @@
 # LOG
 
+## 2026-11-26 — Claude · Ritmo más humano y corrección cuando la IA niega tener herramientas
+- **Caso real (Gemini):** hizo 8 llamadas a `terminal-mcp` sin problema y luego contestó en texto que «terminal-mcp no está disponible», describiendo pasos manuales sin ejecutarlos. No traía `mcp_call`, así que el puente no hizo nada. La detección que ya existía (`DENIAL`) solo miraba respuestas de <1500 caracteres y no conocía frases como «no tengo habilitada la ejecución»; además solo reponía las instrucciones en el SIGUIENTE mensaje del usuario.
+- `WMB.isDenial` (utils.js): mira el inicio de la respuesta y, en las largas, frases que niegan MCP/terminal/herramientas; nunca actúa si hay `mcp_call`. Con `autoCorrect` (Ajustes, activo) la extensión envía sola `WMB.denialMessage` (máx. 2 por mensaje del usuario, respetando el ritmo de envío) y renueva las instrucciones completas. Registro: `ai.denial_detected` y `ai.denial_corrected`.
+- Prompt: regla 7 «No afirmes nada del equipo sin un MCP_RESULT… llama primero» y el recordatorio de una línea lo repite; se acortaron otras reglas para seguir bajo 1700 caracteres.
+- Ritmo: pausa entre envíos 2–5 s → 4–12 s, máx. 8 → 5 envíos/min, y nueva «Pausa de lectura» (`readPause`, activa): 1–3 s al azar + hasta 4 s según el tamaño del resultado. Quien conservaba los valores antiguos por defecto pasa a los nuevos (migración en `loadState`); lo elegido a mano se respeta. Todo se cambia en Ajustes.
+- Pruebas: `test_utils.mjs` (casos 12–13) y `test_prompt.mjs`. `tests/browser/test_ritmo.mjs` desactiva la pausa de lectura (no se pudo ejecutar aquí: sin Chromium).
+
 ## 2026-11-25 — Claude · Parser más tolerante con los descuidos de estructura de DeepSeek
 - `extractMcpCalls` ya leía barras sueltas, comillas tipográficas y `@@@`. Ahora también: coma final antes de `}`/`]`, `True/False/None` de Python, cadenas con comillas simples, claves sin comillas (`{mcp_call:{name:…}}`) y `mcp_call` con comillas simples. Si falta `"arguments"`, los demás campos del objeto son los argumentos (el modelo olvidó el nivel). Las cadenas con comillas dobles no se tocan.
 - **Regla que no cambia**: un bloque CORTADO (llaves o `@@@` sin cerrar) NO se completa ni se ejecuta: podría perder argumentos (p. ej. una lista de handles a borrar). Sigue explicándose con `diagnoseMcpCall` y se le pide a la IA reenviarlo.

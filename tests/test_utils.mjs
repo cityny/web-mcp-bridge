@@ -179,3 +179,19 @@ assert.deepEqual({ ...calls[0].arguments }, {});
 assert.equal(WMB.extractMcpCalls('{"mcp_call":{"server":"autocad","name":"operar_seleccion","arguments":{"accion":"borrar","handles":["1A","2B"').length, 0);
 assert.match(WMB.diagnoseMcpCall('{"mcp_call":{"server":"autocad","name":"operar_seleccion","arguments":{"accion":"borrar","handles":["1A","2B"'), /no está cerrado/);
 console.log('✔ parser tolerante: estructura, comillas simples, sin arguments y bloque cortado');
+
+// 12) Negación de herramientas: la IA dice que no las tiene (caso real de Gemini, 2026-11-26) → se detecta aunque la respuesta sea larga
+const gemini = 'En este entorno actual no tengo habilitada la ejecución directa de herramientas MCP (`terminal-mcp` no está disponible para ejecutar comandos en este turno), pero la evaluación ya está clara. ' + 'Diagnóstico… '.repeat(200);
+assert.equal(WMB.isDenial(gemini), true, 'respuesta larga que empieza negando');
+for (const t of ['No tengo acceso a tu equipo.', 'Lo siento, no puedo ejecutar comandos aquí.', "I don't have access to tools in this chat.", 'I cannot run commands on your machine.',
+  'Aquí tienes el plan. El MCP terminal-mcp no está disponible ahora mismo.', 'The MCP tools are not available in this turn.']) assert.equal(WMB.isDenial(t), true, t);
+for (const t of ['Listo, cerré los procesos.', 'Con las herramientas puedo ejecutar el comando.', '{"mcp_call":{"server":"a","name":"b","arguments":{}}}',
+  'No tengo acceso a eso, pero llamo ya: {"mcp_call":{"server":"t","name":"x","arguments":{}}}', '']) assert.equal(WMB.isDenial(t), false, t);
+assert.match(WMB.denialMessage([{ server: 'terminal-mcp' }, { server: 'terminal-mcp' }], 1), /SÍ tienes herramientas MCP locales.*terminal-mcp; 2/);
+assert.match(WMB.denialMessage([], 2), /mcp_call/);
+// 13) Pausa de lectura: 1–3 s + tamaño (tope 4 s)
+assert.equal(WMB.readPause(0, () => 0), 1000);
+assert.equal(WMB.readPause(0, () => 1), 3000);
+assert.equal(WMB.readPause(5000, () => 0), 3000, '5000 caracteres = +2 s');
+assert.equal(WMB.readPause(1e6, () => 1), 7000, 'tope: 3 s + 4 s');
+console.log('✔ negación de herramientas y pausa de lectura');

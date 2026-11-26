@@ -27,6 +27,7 @@ assert.ok(!prompt.includes('$schema') && !prompt.includes('sumarArguments'), 'la
 assert.match(prompt, /"mcp_call"/);
 assert.ok(prompt.startsWith(`[WMB:${WMB.toolsSignature(tools)}]`), 'debe empezar con el marcador');
 assert.match(prompt, /SÍ tienes acceso/);
+assert.match(prompt, /No afirmes nada del equipo/, 'regla anti-invención');
 assert.ok(prompt.length < 1700, 'el prompt base debe ser compacto');
 assert.notEqual(WMB.toolsSignature(tools), WMB.toolsSignature([]));
 assert.match(WMB.buildSystemPrompt([]), /Ningún servidor MCP activo/);
